@@ -11,7 +11,7 @@
         "free-trial": 0
     },
     "roles": {
-        "lifetime": ""
+        "lifetime": "1572659652452421826"
     },
     "queue_ranks": {
         "developer": "",
@@ -23,11 +23,11 @@
     },
     "channels": {
         "languagenut": "",
-        "sparx_maths": "",
-        "sparx_reader": "",
-        "sparx_science": "",
+        "sparx_maths": "1572669821542211674",
+        "sparx_reader": "1572669861048352968",
+        "sparx_science": "1572669905583472730",
         "educake": "",
-        "seneca": "",
+        "seneca": "1572669922805551154",
         "drfrost": ""
     },
     "image_solver": "",
