@@ -1,3 +1,5 @@
+
+{
     "reader_queue_max": 6,
     "maths_queue_max": 3,
     "science_queue_max": 3,
