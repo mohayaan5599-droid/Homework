@@ -1,4 +1,20 @@
-const { SlashCommandBuilder, TextInputStyle, ModalBuilder, StringSelectMenuBuilder, LabelBuilder, TextInputBuilder, ComponentType, ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    TextInputStyle,
+    ModalBuilder,
+    StringSelectMenuBuilder,
+    LabelBuilder,
+    TextInputBuilder,
+    ComponentType,
+    ButtonBuilder,
+    ButtonStyle,
+    ActionRowBuilder,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize
+} = require('discord.js');
+
 const { checkAccount, activateFreeTrial } = require('../../database/accounts');
 const config = require('../../config.json');
 const queueRanksPositions = config.queue_ranks;
@@ -11,10 +27,11 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('account')
         .setDescription('View your SparxNow Account'),
+
     public: true,
 
     async execute(interaction) {
-        // Acknowledge the command immediately to prevent the 3-second timeout.
+        // Acknowledge immediately.
         await interaction.deferReply({
             flags: 32768 | 64
         });
@@ -23,8 +40,13 @@ module.exports = {
             spacing: SeparatorSpacingSize.Small
         });
 
-        const roleID = whatRole(await interaction.guild.members.fetch(interaction.user.id));
-        const userRole = Object.keys(queueRanksPositions).find(key => queueRanksPositions[key] === roleID) ?? null;
+        const roleID = whatRole(
+            await interaction.guild.members.fetch(interaction.user.id)
+        );
+
+        const userRole = Object.keys(queueRanksPositions)
+            .find(key => queueRanksPositions[key] === roleID) ?? null;
+
         console.log(userRole);
 
         const account = await checkAccount(interaction.user.id, userRole);
@@ -48,7 +70,9 @@ module.exports = {
                 usages += `${platform.charAt(0).toUpperCase() + platform.slice(1)}: ${usage.length}/${account.slots}\n`;
             }
 
-            const section = new TextDisplayBuilder().setContent(`## <@${interaction.user.id}>'s Account\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Slots Limit**: You have an account slots limit of **${account.slots}**.\n**Account Rank**: Your current account rank is **${account.license ?? 'None'}**.\n### Account Slots (Last 24 Hours)\n\`\`\`js\n${usages || 'No slots used in the past 24 Hours'}\`\`\``);
+            const section = new TextDisplayBuilder().setContent(
+                `## <@${interaction.user.id}>'s Account\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Slots Limit**: You have an account slots limit of **${account.slots}**.\n**Account Rank**: Your current account rank is **${account.license ?? 'None'}**.\n### Account Slots (Last 24 Hours)\n\`\`\`js\n${usages || 'No slots used in the past 24 Hours'}\`\`\``
+            );
 
             const statsBtn = new ButtonBuilder()
                 .setCustomId('view_stats')
@@ -77,7 +101,7 @@ module.exports = {
             const freetrialBtn = new ButtonBuilder()
                 .setCustomId('activate_free_trial')
                 .setLabel('Activate Free Trial')
-                .setEmoji(emojis.tick)
+                .setEmoji({ name: '✅' })
                 .setStyle(ButtonStyle.Success);
 
             const row = new ActionRowBuilder().addComponents(statsBtn, savedBtn);
@@ -108,21 +132,14 @@ module.exports = {
                             .setCustomId('handleSettings')
                             .setTitle('Settings for Platform...');
 
-                        /*
-                            { label: "LanguageNut", value: "languagenut", emoji: emojis.languagenut },
-                            { label: "Educake", value: "educake", emoji: emojis.educake },
-                            { label: "Seneca", value: "seneca", emoji: emojis.seneca },
-                            { label: "DrFrost", value: "drfrost", emoji: emojis.drfrost }
-                        */
-
                         const sparxInput = new StringSelectMenuBuilder()
                             .setCustomId('platform')
-                            .setPlaceholder("Platform")
+                            .setPlaceholder('Platform')
                             .addOptions(
-                                { label: "General", value: "general" },
-                                { label: "Reader", value: "reader", emoji: emojis.reader },
-                                { label: "Maths", value: "maths", emoji: emojis.maths },
-                                { label: "Science", value: "science", emoji: emojis.science }
+                                { label: 'General', value: 'general' },
+                                { label: 'Reader', value: 'reader', emoji: emojis.reader },
+                                { label: 'Maths', value: 'maths', emoji: emojis.maths },
+                                { label: 'Science', value: 'science', emoji: emojis.science }
                             );
 
                         const typeLabel = new LabelBuilder({
@@ -138,7 +155,9 @@ module.exports = {
                     await buttonInteraction.deferUpdate();
 
                     if (buttonInteraction.customId === 'view_stats') {
-                        const section = new TextDisplayBuilder().setContent(`## 📊 Statistics\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Time Saved**: You have saved **${formatTime(timeSaved)}** of time.\n### Platform Usage\n\`\`\`js\n${platformsUsed}\`\`\`\n### Time Saved\n\`\`\`js\n${timeSavedPlatforms}\`\`\``);
+                        const section = new TextDisplayBuilder().setContent(
+                            `## 📊 Statistics\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Time Saved**: You have saved **${formatTime(timeSaved)}** of time.\n### Platform Usage\n\`\`\`js\n${platformsUsed}\`\`\`\n### Time Saved\n\`\`\`js\n${timeSavedPlatforms}\`\`\``
+                        );
 
                         const container = new ContainerBuilder()
                             .setAccentColor(0x353839)
@@ -150,16 +169,18 @@ module.exports = {
                         });
 
                     } else if (buttonInteraction.customId === 'manage_saved_accounts') {
-                        const section = new TextDisplayBuilder().setContent(`## 🗂️ Saved Accounts\nManage all your saved accounts. You can save accounts by clicking on the \`Save Account\` button at the homework selection on one of our services, this option only appears if you **did not** login with cookies.\n### Warning: Changing your Master Password will delete all saved accounts!`);
+                        const section = new TextDisplayBuilder().setContent(
+                            `## 🗂️ Saved Accounts\nManage all your saved accounts. You can save accounts by clicking on the \`Save Account\` button at the homework selection on one of our services, this option only appears if you **did not** login with cookies.\n### Warning: Changing your Master Password will delete all saved accounts!`
+                        );
 
                         const statsBtn = new ButtonBuilder()
-                            .setCustomId("view_accounts")
+                            .setCustomId('view_accounts')
                             .setLabel('View Accounts')
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji(emojis.accounts);
 
                         const savedBtn = new ButtonBuilder()
-                            .setCustomId("change_master_password")
+                            .setCustomId('change_master_password')
                             .setLabel('Change Master Password')
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji(emojis.key);
@@ -188,7 +209,7 @@ module.exports = {
 
                                 const schoolInput = new TextInputBuilder()
                                     .setCustomId('master_password')
-                                    .setLabel("Master Password")
+                                    .setLabel('Master Password')
                                     .setStyle(TextInputStyle.Short);
 
                                 buttons.push(schoolInput);
@@ -199,7 +220,9 @@ module.exports = {
                                         .setTitle('Saved Accounts Login');
 
                                     for (const button of buttons) {
-                                        modal.addComponents(new ActionRowBuilder().addComponents(button));
+                                        modal.addComponents(
+                                            new ActionRowBuilder().addComponents(button)
+                                        );
                                     }
 
                                     await accountInteraction.showModal(modal);
@@ -210,7 +233,9 @@ module.exports = {
                                         .setTitle('Change Master Password');
 
                                     for (const button of buttons) {
-                                        modal.addComponents(new ActionRowBuilder().addComponents(button));
+                                        modal.addComponents(
+                                            new ActionRowBuilder().addComponents(button)
+                                        );
                                     }
 
                                     await accountInteraction.showModal(modal);
@@ -227,16 +252,18 @@ module.exports = {
                             configured += `${mainAccount.charAt(0).toUpperCase() + mainAccount.slice(1)}: Configured\n`;
                         }
 
-                        const section = new TextDisplayBuilder().setContent(`## 🔒 Configure Main Accounts\nConfigure your main accounts for each platform. Main accounts do **not** count towards your accounts slots. **Your main accounts should only be your own personal accounts**, this is so you can still do *your* homework if you use up your daily slots and it is also used to prevent free trial abusing.\n### Main Accounts Configured\n\`\`\`js\n${configured || 'You have no Main Accounts Configured'}\`\`\`\n### Warning: Configuring a Main Account is irreversible!`);
+                        const section = new TextDisplayBuilder().setContent(
+                            `## 🔒 Configure Main Accounts\nConfigure your main accounts for each platform. Main accounts do **not** count towards your accounts slots. **Your main accounts should only be your own personal accounts**, this is so you can still do *your* homework if you use up your daily slots and it is also used to prevent free trial abusing.\n### Main Accounts Configured\n\`\`\`js\n${configured || 'You have no Main Accounts Configured'}\`\`\`\n### Warning: Configuring a Main Account is irreversible!`
+                        );
 
                         const statsBtn = new ButtonBuilder()
-                            .setCustomId("add_main_account")
+                            .setCustomId('add_main_account')
                             .setLabel('Add Main Account')
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji(emojis.main_accounts);
 
                         const cookieBtn = new ButtonBuilder()
-                            .setCustomId("add_main_cookie_account")
+                            .setCustomId('add_main_cookie_account')
                             .setLabel('Add Main Account with Cookies (Sparx Only)')
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji(emojis.cookies);
@@ -268,41 +295,41 @@ module.exports = {
                                 if (accountInteraction.customId === 'add_main_account') {
                                     const schoolInput = new TextInputBuilder()
                                         .setCustomId('school')
-                                        .setLabel("School")
+                                        .setLabel('School')
                                         .setPlaceholder('If needed for login')
                                         .setRequired(false)
                                         .setStyle(TextInputStyle.Short);
 
                                     const emailInput = new TextInputBuilder()
                                         .setCustomId('email')
-                                        .setLabel("Email Address/Username")
+                                        .setLabel('Email Address/Username')
                                         .setStyle(TextInputStyle.Short);
 
                                     const passwordInput = new TextInputBuilder()
                                         .setCustomId('password')
-                                        .setLabel("Password")
+                                        .setLabel('Password')
                                         .setStyle(TextInputStyle.Short);
 
                                     const typeInput = new StringSelectMenuBuilder()
                                         .setCustomId('type')
-                                        .setPlaceholder("Normal/Microsoft/Google (If needed for login)")
+                                        .setPlaceholder('Normal/Microsoft/Google (If needed for login)')
                                         .addOptions(
-                                            { label: "Normal", value: "Normal", emoji: emojis.sparx },
-                                            { label: "Microsoft", value: "Microsoft", emoji: emojis.microsoft },
-                                            { label: "Google", value: "Google", emoji: emojis.google }
+                                            { label: 'Normal', value: 'Normal', emoji: emojis.sparx },
+                                            { label: 'Microsoft', value: 'Microsoft', emoji: emojis.microsoft },
+                                            { label: 'Google', value: 'Google', emoji: emojis.google }
                                         );
 
                                     const sparxInput = new StringSelectMenuBuilder()
                                         .setCustomId('platform')
-                                        .setPlaceholder("Platform")
+                                        .setPlaceholder('Platform')
                                         .addOptions(
-                                            { label: "Reader", value: "reader", emoji: emojis.reader },
-                                            { label: "Maths", value: "maths", emoji: emojis.maths },
-                                            { label: "Science", value: "science", emoji: emojis.science },
-                                            { label: "LanguageNut", value: "languagenut", emoji: emojis.languagenut },
-                                            { label: "Educake", value: "educake", emoji: emojis.educake },
-                                            { label: "Seneca", value: "seneca", emoji: emojis.seneca },
-                                            { label: "DrFrost", value: "drfrost", emoji: emojis.drfrost }
+                                            { label: 'Reader', value: 'reader', emoji: emojis.reader },
+                                            { label: 'Maths', value: 'maths', emoji: emojis.maths },
+                                            { label: 'Science', value: 'science', emoji: emojis.science },
+                                            { label: 'LanguageNut', value: 'languagenut', emoji: emojis.languagenut },
+                                            { label: 'Educake', value: 'educake', emoji: emojis.educake },
+                                            { label: 'Seneca', value: 'seneca', emoji: emojis.seneca },
+                                            { label: 'DrFrost', value: 'drfrost', emoji: emojis.drfrost }
                                         );
 
                                     const buttons = [schoolInput, emailInput, passwordInput];
@@ -320,7 +347,9 @@ module.exports = {
                                     modal.addLabelComponents(sparxLabel);
 
                                     for (const button of buttons) {
-                                        modal.addComponents(new ActionRowBuilder().addComponents(button));
+                                        modal.addComponents(
+                                            new ActionRowBuilder().addComponents(button)
+                                        );
                                     }
 
                                     modal.addLabelComponents(typeLabel);
@@ -328,10 +357,12 @@ module.exports = {
                                 } else if (accountInteraction.customId === 'add_main_cookie_account') {
                                     const cookieInput = new TextInputBuilder()
                                         .setCustomId('cookies')
-                                        .setLabel("Cookies String")
+                                        .setLabel('Cookies String')
                                         .setStyle(TextInputStyle.Paragraph);
 
-                                    modal.addComponents(new ActionRowBuilder().addComponents(cookieInput));
+                                    modal.addComponents(
+                                        new ActionRowBuilder().addComponents(cookieInput)
+                                    );
                                 }
 
                                 await accountInteraction.showModal(modal);
@@ -343,7 +374,9 @@ module.exports = {
 
                     } else if (buttonInteraction.customId === 'activate_free_trial') {
                         if (!Object.keys(account.main_accounts).length) {
-                            const section = new TextDisplayBuilder().setContent(`### No Main Accounts Exist\nYou have no main accounts configured. Please configure at least one main account to activate your free trial. If you have *just* configured a main account, please run the command \`/account\` again.`);
+                            const section = new TextDisplayBuilder().setContent(
+                                '### No Main Accounts Exist\nYou have no main accounts configured. Please configure at least one main account to activate your free trial. If you have *just* configured a main account, please run the command `/account` again.'
+                            );
 
                             const container = new ContainerBuilder()
                                 .setAccentColor(0xFF474D)
@@ -357,18 +390,22 @@ module.exports = {
                             return;
                         }
 
-                        const freeTrailActivatedSuccess = await activateFreeTrial(buttonInteraction.user.id);
+                        const freeTrailActivatedSuccess = await activateFreeTrial(
+                            buttonInteraction.user.id
+                        );
 
                         if (freeTrailActivatedSuccess) {
-                            const freetrialRoleId = queueRanksPositions["free-trial"];
+                            const freetrialRoleId = queueRanksPositions['free-trial'];
 
                             try {
-                                await interaction.member.roles.add(freetrialRoleId);
+                                await buttonInteraction.member.roles.add(freetrialRoleId);
                             } catch (error) {
                                 console.error(error);
                             }
 
-                            const section = new TextDisplayBuilder().setContent(`### Free Trial Activated\nYour 3-day Free Trial for SparxNow has been successfully activated!`);
+                            const section = new TextDisplayBuilder().setContent(
+                                '### Free Trial Activated\nYour 3-day Free Trial for SparxNow has been successfully activated!'
+                            );
 
                             const container = new ContainerBuilder()
                                 .setAccentColor(0x90EE90)
@@ -380,7 +417,9 @@ module.exports = {
                             });
 
                         } else {
-                            const section = new TextDisplayBuilder().setContent(`### Free Trial Already Exists\nYou already activated your Free Trial.`);
+                            const section = new TextDisplayBuilder().setContent(
+                                '### Free Trial Already Exists\nYou already activated your Free Trial.'
+                            );
 
                             const container = new ContainerBuilder()
                                 .setAccentColor(0xFF474D)
@@ -399,7 +438,9 @@ module.exports = {
             });
 
         } else {
-            const section = new TextDisplayBuilder().setContent(`## Create an Account\nBy creating an account, you agree to the Terms of Service of SparxNow which can be found at https://discord.com/channels/1351338824759906345/1446936637627043932`);
+            const section = new TextDisplayBuilder().setContent(
+                `## Create an Account\nBy creating an account, you agree to the Terms of Service of SparxNow which can be found at https://discord.com/channels/1351338824759906345/1446936637627043932`
+            );
 
             const statsBtn = new ButtonBuilder()
                 .setCustomId('agree')
@@ -428,7 +469,9 @@ module.exports = {
                     if (buttonInteraction.customId === 'agree') {
                         await buttonInteraction.deferUpdate();
 
-                        const section = new TextDisplayBuilder().setContent(`## Create Master Password\nCreate a Master Password that will be used whenever you choose to save an account one of our services. The option to save an account will be provided at the homework selection assuming you **did not** login with cookies. You will be prompted to input your Master Password whenever you try to save an account.\n\nThe Master Password stored in the Database is hashed and all saved account data is encrypted. Consequently, we **cannot view your saved accounts or master password** meaning all saved accounts are deleted when changing the Master Password.`);
+                        const section = new TextDisplayBuilder().setContent(
+                            `## Create Master Password\nCreate a Master Password that will be used whenever you choose to save an account one of our services. The option to save an account will be provided at the homework selection assuming you **did not** login with cookies. You will be prompted to input your Master Password whenever you try to save an account.\n\nThe Master Password stored in the Database is hashed and all saved account data is encrypted. Consequently, we **cannot view your saved accounts or master password** meaning all saved accounts are deleted when changing the Master Password.`
+                        );
 
                         const statsBtn = new ButtonBuilder()
                             .setCustomId('create_master_password')
@@ -453,7 +496,7 @@ module.exports = {
 
                         const schoolInput = new TextInputBuilder()
                             .setCustomId('master_password')
-                            .setLabel("Master Password")
+                            .setLabel('Master Password')
                             .setStyle(TextInputStyle.Short);
 
                         buttons.push(schoolInput);
@@ -463,7 +506,9 @@ module.exports = {
                             .setTitle('Saved Accounts Login');
 
                         for (const button of buttons) {
-                            modal.addComponents(new ActionRowBuilder().addComponents(button));
+                            modal.addComponents(
+                                new ActionRowBuilder().addComponents(button)
+                            );
                         }
 
                         await buttonInteraction.showModal(modal);
@@ -474,5 +519,5 @@ module.exports = {
                 }
             });
         }
-    },
+    }
 };
