@@ -31,7 +31,7 @@ module.exports = {
     public: true,
 
     async execute(interaction) {
-        // Acknowledge immediately.
+        // Acknowledge immediately
         await interaction.deferReply({
             flags: 32768 | 64
         });
@@ -59,8 +59,11 @@ module.exports = {
 
             for (const [name, platform] of Object.entries(account.total_usage)) {
                 totalUses += platform.total_uses;
+
                 platformsUsed += `${name.charAt(0).toUpperCase() + name.slice(1)}: ${platform.total_uses}\n`;
+
                 timeSaved += platform.time_saved;
+
                 timeSavedPlatforms += `${name.charAt(0).toUpperCase() + name.slice(1)}: ${formatTime(platform.time_saved)}\n`;
             }
 
@@ -71,7 +74,14 @@ module.exports = {
             }
 
             const section = new TextDisplayBuilder().setContent(
-                `## <@${interaction.user.id}>'s Account\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Slots Limit**: You have an account slots limit of **${account.slots}**.\n**Account Rank**: Your current account rank is **${account.license ?? 'None'}**.\n### Account Slots (Last 24 Hours)\n\`\`\`js\n${usages || 'No slots used in the past 24 Hours'}\`\`\``
+                `## <@${interaction.user.id}>'s Account
+**Total Usage**: You have used the bot a total of **${totalUses}** times.
+**Slots Limit**: You have an account slots limit of **${account.slots}**.
+**Account Rank**: Your current account rank is **${account.license ?? 'None'}**.
+### Account Slots (Last 24 Hours)
+\`\`\`js
+${usages || 'No slots used in the past 24 Hours'}
+\`\`\``
             );
 
             const statsBtn = new ButtonBuilder()
@@ -104,8 +114,11 @@ module.exports = {
                 .setEmoji({ name: '✅' })
                 .setStyle(ButtonStyle.Success);
 
-            const row = new ActionRowBuilder().addComponents(statsBtn, savedBtn);
-            const row2 = new ActionRowBuilder().addComponents(mainBtn, settingBtn);
+            const row = new ActionRowBuilder()
+                .addComponents(statsBtn, savedBtn);
+
+            const row2 = new ActionRowBuilder()
+                .addComponents(mainBtn, settingBtn);
 
             if (account.free_trial_start === null && !account.license) {
                 row2.addComponents(freetrialBtn);
@@ -148,6 +161,7 @@ module.exports = {
                         });
 
                         modal.addLabelComponents(typeLabel);
+
                         await buttonInteraction.showModal(modal);
                         return;
                     }
@@ -156,7 +170,17 @@ module.exports = {
 
                     if (buttonInteraction.customId === 'view_stats') {
                         const section = new TextDisplayBuilder().setContent(
-                            `## 📊 Statistics\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Time Saved**: You have saved **${formatTime(timeSaved)}** of time.\n### Platform Usage\n\`\`\`js\n${platformsUsed}\`\`\`\n### Time Saved\n\`\`\`js\n${timeSavedPlatforms}\`\`\``
+                            `## 📊 Statistics
+**Total Usage**: You have used the bot a total of **${totalUses}** times.
+**Time Saved**: You have saved **${formatTime(timeSaved)}** of time.
+### Platform Usage
+\`\`\`js
+${platformsUsed}
+\`\`\`
+### Time Saved
+\`\`\`js
+${timeSavedPlatforms}
+\`\`\``
                         );
 
                         const container = new ContainerBuilder()
@@ -170,7 +194,9 @@ module.exports = {
 
                     } else if (buttonInteraction.customId === 'manage_saved_accounts') {
                         const section = new TextDisplayBuilder().setContent(
-                            `## 🗂️ Saved Accounts\nManage all your saved accounts. You can save accounts by clicking on the \`Save Account\` button at the homework selection on one of our services, this option only appears if you **did not** login with cookies.\n### Warning: Changing your Master Password will delete all saved accounts!`
+                            `## 🗂️ Saved Accounts
+Manage all your saved accounts. You can save accounts by clicking on the \`Save Account\` button at the homework selection on one of our services, this option only appears if you **did not** login with cookies.
+### Warning: Changing your Master Password will delete all saved accounts!`
                         );
 
                         const statsBtn = new ButtonBuilder()
@@ -185,7 +211,8 @@ module.exports = {
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji(emojis.key);
 
-                        const row = new ActionRowBuilder().addComponents(statsBtn, savedBtn);
+                        const row = new ActionRowBuilder()
+                            .addComponents(statsBtn, savedBtn);
 
                         const container = new ContainerBuilder()
                             .setAccentColor(0x353839)
@@ -253,7 +280,13 @@ module.exports = {
                         }
 
                         const section = new TextDisplayBuilder().setContent(
-                            `## 🔒 Configure Main Accounts\nConfigure your main accounts for each platform. Main accounts do **not** count towards your accounts slots. **Your main accounts should only be your own personal accounts**, this is so you can still do *your* homework if you use up your daily slots and it is also used to prevent free trial abusing.\n### Main Accounts Configured\n\`\`\`js\n${configured || 'You have no Main Accounts Configured'}\`\`\`\n### Warning: Configuring a Main Account is irreversible!`
+                            `## 🔒 Configure Main Accounts
+Configure your main accounts for each platform. Main accounts do **not** count towards your accounts slots. **Your main accounts should only be your own personal accounts**, this is so you can still do *your* homework if you use up your daily slots and it is also used to prevent free trial abusing.
+### Main Accounts Configured
+\`\`\`js
+${configured || 'You have no Main Accounts Configured'}
+\`\`\`
+### Warning: Configuring a Main Account is irreversible!`
                         );
 
                         const statsBtn = new ButtonBuilder()
@@ -268,7 +301,8 @@ module.exports = {
                             .setStyle(ButtonStyle.Secondary)
                             .setEmoji(emojis.cookies);
 
-                        const row = new ActionRowBuilder().addComponents(statsBtn, cookieBtn);
+                        const row = new ActionRowBuilder()
+                            .addComponents(statsBtn, cookieBtn);
 
                         const container = new ContainerBuilder()
                             .setAccentColor(0x353839)
@@ -332,7 +366,11 @@ module.exports = {
                                             { label: 'DrFrost', value: 'drfrost', emoji: emojis.drfrost }
                                         );
 
-                                    const buttons = [schoolInput, emailInput, passwordInput];
+                                    const buttons = [
+                                        schoolInput,
+                                        emailInput,
+                                        passwordInput
+                                    ];
 
                                     const typeLabel = new LabelBuilder({
                                         label: 'Login Type',
@@ -375,7 +413,8 @@ module.exports = {
                     } else if (buttonInteraction.customId === 'activate_free_trial') {
                         if (!Object.keys(account.main_accounts).length) {
                             const section = new TextDisplayBuilder().setContent(
-                                '### No Main Accounts Exist\nYou have no main accounts configured. Please configure at least one main account to activate your free trial. If you have *just* configured a main account, please run the command `/account` again.'
+                                `### No Main Accounts Exist
+You have no main accounts configured. Please configure at least one main account to activate your free trial. If you have *just* configured a main account, please run the command \`/account\` again.`
                             );
 
                             const container = new ContainerBuilder()
@@ -398,13 +437,15 @@ module.exports = {
                             const freetrialRoleId = queueRanksPositions['free-trial'];
 
                             try {
+                                // Use the member who clicked the button
                                 await buttonInteraction.member.roles.add(freetrialRoleId);
                             } catch (error) {
                                 console.error(error);
                             }
 
                             const section = new TextDisplayBuilder().setContent(
-                                '### Free Trial Activated\nYour 3-day Free Trial for SparxNow has been successfully activated!'
+                                `### Free Trial Activated
+Your 3-day Free Trial for SparxNow has been successfully activated!`
                             );
 
                             const container = new ContainerBuilder()
@@ -418,7 +459,8 @@ module.exports = {
 
                         } else {
                             const section = new TextDisplayBuilder().setContent(
-                                '### Free Trial Already Exists\nYou already activated your Free Trial.'
+                                `### Free Trial Already Exists
+You already activated your Free Trial.`
                             );
 
                             const container = new ContainerBuilder()
@@ -439,7 +481,8 @@ module.exports = {
 
         } else {
             const section = new TextDisplayBuilder().setContent(
-                `## Create an Account\nBy creating an account, you agree to the Terms of Service of SparxNow which can be found at https://discord.com/channels/1351338824759906345/1446936637627043932`
+                `## Create an Account
+By creating an account, you agree to the Terms of Service of SparxNow which can be found at https://discord.com/channels/1351338824759906345/1446936637627043932`
             );
 
             const statsBtn = new ButtonBuilder()
@@ -448,7 +491,8 @@ module.exports = {
                 .setEmoji({ name: '✅' })
                 .setStyle(ButtonStyle.Success);
 
-            const row = new ActionRowBuilder().addComponents(statsBtn);
+            const row = new ActionRowBuilder()
+                .addComponents(statsBtn);
 
             const container = new ContainerBuilder()
                 .setAccentColor(0x353839)
@@ -470,7 +514,10 @@ module.exports = {
                         await buttonInteraction.deferUpdate();
 
                         const section = new TextDisplayBuilder().setContent(
-                            `## Create Master Password\nCreate a Master Password that will be used whenever you choose to save an account one of our services. The option to save an account will be provided at the homework selection assuming you **did not** login with cookies. You will be prompted to input your Master Password whenever you try to save an account.\n\nThe Master Password stored in the Database is hashed and all saved account data is encrypted. Consequently, we **cannot view your saved accounts or master password** meaning all saved accounts are deleted when changing the Master Password.`
+                            `## Create Master Password
+Create a Master Password that will be used whenever you choose to save an account one of our services. The option to save an account will be provided at the homework selection assuming you **did not** login with cookies. You will be prompted to input your Master Password whenever you try to save an account.
+
+The Master Password stored in the Database is hashed and all saved account data is encrypted. Consequently, we **cannot view your saved accounts or master password** meaning all saved accounts are deleted when changing the Master Password.`
                         );
 
                         const statsBtn = new ButtonBuilder()
@@ -479,7 +526,8 @@ module.exports = {
                             .setEmoji(emojis.key)
                             .setStyle(ButtonStyle.Primary);
 
-                        const row = new ActionRowBuilder().addComponents(statsBtn);
+                        const row = new ActionRowBuilder()
+                            .addComponents(statsBtn);
 
                         const container = new ContainerBuilder()
                             .setAccentColor(0x353839)
