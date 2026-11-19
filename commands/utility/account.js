@@ -1,566 +1,610 @@
-const { SlashCommandBuilder, TextInputStyle, ModalBuilder, MessageFlags, StringSelectMenuBuilder, LabelBuilder, TextInputBuilder, ComponentType, ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
-const { checkAccount, activateFreeTrial } = require('../../database/accounts');
+const {
+    SlashCommandBuilder,
+    TextInputStyle,
+    ModalBuilder,
+    StringSelectMenuBuilder,
+    LabelBuilder,
+    TextInputBuilder,
+    ComponentType,
+    ButtonBuilder,
+    ButtonStyle,
+    ActionRowBuilder,
+    EmbedBuilder
+} = require('discord.js');
+
+const {
+    checkAccount,
+    activateFreeTrial
+} = require('../../database/accounts');
+
 const config = require('../../config.json');
 const queueRanksPositions = config.queue_ranks;
 const emojis = config.emojis;
 const whatRole = require('../../utils/whatRole');
 const formatTime = require('../../utils/formatTime');
-const { name, colours } = require('../../config.json');
-const fs = require('node:fs').promises; // Use the Promise-based fs API
-const path = require('node:path');
 
-async function getSettingsData() {
-    const baseDir = path.join(process.cwd(), 'autocompleters');
-    let results = [];
-    
-    // Create an internal helper function that CAN take parameters
-    async function searchDirectory(currentDir) {
-        let items;
-        try {
-            items = await fs.readdir(currentDir, { withFileTypes: true });
-        } catch {
-            // Silently return if the directory doesn't exist or permissions fail
-            return;
-        }
-
-        const promises = [];
-
-        for (const item of items) {
-            const fullPath = path.join(currentDir, item.name);
-
-            if (item.isDirectory()) {
-                // Recursively call the HELPER function concurrently
-                promises.push(searchDirectory(fullPath));
-            } else if (item.isFile() && item.name === 'settings.json') {
-                
-                // 1. Get the path relative to the baseDir 
-                // (e.g., returns "sparx/children/maths" or "sparx\children\maths" depending on OS)
-                const relativeDir = path.relative(baseDir, currentDir);
-                
-                // 2. Split the path by the OS-specific separator (\ on Windows, / on Mac/Linux)
-                const pathParts = relativeDir.split(path.sep);
-                
-                let combinedValue;
-                
-                // 3. If nested deep enough, grab the top folder and the immediate parent folder
-                if (pathParts.length > 1) {
-                    const topFolder = pathParts[0];                     // e.g., 'sparx'
-                    const bottomFolder = pathParts[pathParts.length - 1]; // e.g., 'maths'
-                    combinedValue = `${topFolder}_${bottomFolder}`;     // 'sparx_maths'
-                } else {
-                    // Fallback just in case a settings.json is directly inside a top-level folder
-                    combinedValue = pathParts[0]; 
-                }
-
-                // Keep your original folderName logic for the label
-                const folderName = path.basename(currentDir);
-                const labelName = folderName.charAt(0).toUpperCase() + folderName.slice(1);
-
-                results.push({
-                    label: labelName,           // Stays as 'Maths'
-                    value: combinedValue,      // Now 'sparx_maths'
-                    emoji: emojis[combinedValue] // Now looks up emojis['sparx_maths']
-                });
-            }
-        }
-        
-        // Wait for all subdirectories in this folder to finish searching
-        await Promise.all(promises);
-    }
-
-    // Start the search and wait for the entire tree
-    await searchDirectory(baseDir);
-
-    return results;
+// Create embeds
+function makeEmbed(title, description, color = 0x353839) {
+    return new EmbedBuilder()
+        .setColor(color)
+        .setTitle(title)
+        .setDescription(description);
 }
 
-async function getPlatformNames() {
-    const baseDir = path.join(process.cwd(), 'autocompleters');
-    let results = [];
+// Create action rows
+function makeRow(...components) {
+    return new ActionRowBuilder().addComponents(...components);
+}
 
-    try {
-        // Read only the direct contents of the autocompleters directory asynchronously
-        const items = await fs.readdir(baseDir, { withFileTypes: true });
-
-        for (const item of items) {
-            // Only get the names of the parent folders, ignoring any stray files
-            if (item.isDirectory()) {
-                const folderName = item.name;
-                
-                // Capitalize the first letter (e.g., 'seneca' -> 'Seneca')
-                const labelName = folderName.charAt(0).toUpperCase() + folderName.slice(1);
-
-                results.push({
-                    label: labelName,
-                    value: folderName,
-                    emoji: emojis[folderName] // Strictly relies on the dictionary, no fallback
-                });
-            }
-        }
-    } catch (error) {
-        console.error("Failed to read autocompleters base directory:", error);
+// Safely apply optional configured emojis
+function setButtonEmoji(button, emoji, fallback) {
+    if (emoji && typeof emoji === 'object' && (emoji.id || emoji.name)) {
+        button.setEmoji(emoji);
+    } else if (typeof emoji === 'string' && emoji.length > 0) {
+        button.setEmoji({ name: emoji });
+    } else if (fallback) {
+        button.setEmoji({ name: fallback });
     }
 
-    return results;
+    return button;
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('account')
-        .setDescription(`View your ${name} Account`),
+        .setDescription('View your SparxNow Account'),
+
     public: true,
+
     async execute(interaction) {
-        const seperator = new SeparatorBuilder({
-            spacing: SeparatorSpacingSize.Small
-        });
+        await interaction.deferReply({ flags: 64 });
 
-        const roleID = whatRole(await interaction.guild.members.fetch(interaction.user.id));
-        const userRole = Object.keys(queueRanksPositions).find(key => queueRanksPositions[key] === roleID) ?? null;
-        const account = await checkAccount(interaction.user.id, userRole);
+        try {
+            const member = await interaction.guild.members.fetch(
+                interaction.user.id
+            );
 
-        if (account) {
+            const roleID = whatRole(member);
 
-            let totalUses = 0;
-            let platformsUsed = '';
-            let timeSaved = 0;
-            let timeSavedPlatforms = '';
-            for (const [name, platform] of Object.entries(account.total_usage)) {
-                totalUses += platform.total_uses;
-                platformsUsed += `${name.charAt(0).toUpperCase() + name.slice(1)}: ${platform.total_uses}\n`;
-                timeSaved += platform.time_saved;
-                timeSavedPlatforms += `${name.charAt(0).toUpperCase() + name.slice(1)}: ${formatTime(platform.time_saved)}\n`;
-            }
+            const userRole = Object.keys(queueRanksPositions)
+                .find(key => queueRanksPositions[key] === roleID) ?? null;
 
-            let usages = '';
-            for (const [platform, usage] of Object.entries(account.uses)) {
-                usages += `${platform.charAt(0).toUpperCase() + platform.slice(1)}: ${usage.length}/${account.slots}\n`;
-            }
+            console.log('Account role:', userRole);
 
-            const statsBtn = new ButtonBuilder()
-                .setCustomId('view_stats')
-                .setLabel('View Stats')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(emojis.stats);
+            const account = await checkAccount(
+                interaction.user.id,
+                userRole
+            );
 
-            const savedBtn = new ButtonBuilder()
-                .setCustomId('manage_saved_accounts')
-                .setLabel('Saved Accounts')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(emojis.accounts);
+            // ==========================================
+            // EXISTING ACCOUNT
+            // ==========================================
 
-            const mainBtn = new ButtonBuilder()
-                .setCustomId('configure_main_accounts')
-                .setLabel('Main Accounts')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(emojis.main_accounts);
+            if (account) {
+                let totalUses = 0;
+                let platformsUsed = '';
+                let timeSaved = 0;
+                let timeSavedPlatforms = '';
 
-            const settingBtn = new ButtonBuilder()
-                .setCustomId('settings')
-                .setLabel('Settings')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(emojis.settings);
+                for (const [name, platform] of Object.entries(account.total_usage || {})) {
+                    totalUses += platform.total_uses || 0;
 
-            const freetrialBtn = new ButtonBuilder()
-                .setCustomId('activate_free_trial')
-                .setLabel('Activate Free Trial')
-                .setEmoji(emojis.tick)
-                .setStyle(ButtonStyle.Success);
+                    platformsUsed +=
+                        `${name.charAt(0).toUpperCase() + name.slice(1)}: ${platform.total_uses || 0}\n`;
 
-            const row = new ActionRowBuilder().addComponents(statsBtn, savedBtn);
-            const row2 = new ActionRowBuilder().addComponents();
-            if (config.require_mainaccounts) {
-                row2.addComponents(mainBtn);
-            }
-            row2.addComponents(settingBtn);
-            if (account.free_trial_start === null && !account.license) {
-                row2.addComponents(freetrialBtn);
-            }
+                    timeSaved += platform.time_saved || 0;
 
-            const container = new ContainerBuilder()
-                .setAccentColor(colours.onyx)
-                .addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(`## <@${interaction.user.id}>'s Account\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Slots Limit**: You have an account slots limit of **${account.slots}**.\n**Account Rank**: Your current account rank is **${account.license ?? 'None'}**.\n### Account Slots (Last 24 Hours)\n\`\`\`js\n${usages || 'No slots used in the past 24 Hours'}\`\`\``)
-                )
-                .addSeparatorComponents(
-                    seperator
-                )
-                .addActionRowComponents(
-                    row,
-                    row2
-                );
-
-            const message_sent = await interaction.reply({
-                flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                components: [container],
-                fetchReply: true
-            });
-
-            const collector = message_sent.createMessageComponentCollector({
-                componentType: ComponentType.Button
-            });
-
-            collector.on('collect', async (buttonInteraction) => {
-
-                if (buttonInteraction.customId === 'settings') {
-                    const modal = new ModalBuilder()
-                        .setCustomId('handleSettings')
-                        .setTitle('Settings for Platform...');
-
-                    const generalSetting = { label: 'General', value: 'general'};
-                    
-                    // Added await since getSettingsData is now async
-                    const platformSettings  = [generalSetting, ...(await getSettingsData())]; 
-                    
-                    const sparxInput = new StringSelectMenuBuilder()
-                        .setCustomId('platform')
-                        .setPlaceholder("Platform")
-                        .addOptions(
-                            ...platformSettings
-                        );
-
-                    const typeLabel = new LabelBuilder({
-                        label: 'Platform',
-                        component: sparxInput
-                    });
-                    modal.addLabelComponents(typeLabel);
-                    await buttonInteraction.showModal(modal);
-                    return;
-                    // await handleSettings(buttonInteraction);
+                    timeSavedPlatforms +=
+                        `${name.charAt(0).toUpperCase() + name.slice(1)}: ${formatTime(platform.time_saved || 0)}\n`;
                 }
 
-                await buttonInteraction.deferUpdate();
+                let usages = '';
 
-                if (buttonInteraction.customId === 'view_stats') {
-                    const container = new ContainerBuilder()
-                        .setAccentColor(colours.onyx)
-                        .addTextDisplayComponents(
-                            new TextDisplayBuilder().setContent(`## 📊 Statistics\n**Total Usage**: You have used the bot a total of **${totalUses}** times.\n**Time Saved**: You have saved **${formatTime(timeSaved)}** of time.\n### Platform Usage\n\`\`\`js\n${platformsUsed}\`\`\`\n### Time Saved\n\`\`\`js\n${timeSavedPlatforms}\`\`\``)
-                        );
+                for (const [platform, usage] of Object.entries(account.uses || {})) {
+                    usages +=
+                        `${platform.charAt(0).toUpperCase() + platform.slice(1)}: ${usage.length}/${account.slots}\n`;
+                }
 
-                    await buttonInteraction.followUp({
-                        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                        components: [container]
-                    });
-                } else if (buttonInteraction.customId === 'manage_saved_accounts') {
-                    const statsBtn = new ButtonBuilder()
-                        .setCustomId("view_accounts")
-                        .setLabel('View Accounts')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setEmoji(emojis.accounts);
+                const statsBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('view_stats')
+                        .setLabel('View Stats')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.stats
+                );
 
-                    const savedBtn = new ButtonBuilder()
-                        .setCustomId("change_master_password")
-                        .setLabel('Change Master Password')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setEmoji(emojis.key);
+                const savedBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('manage_saved_accounts')
+                        .setLabel('Saved Accounts')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.accounts
+                );
 
-                    const row = new ActionRowBuilder().addComponents(statsBtn, savedBtn);
+                const mainBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('configure_main_accounts')
+                        .setLabel('Main Accounts')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.main_accounts
+                );
 
-                    // 3. Assemble everything into the main container
-                    const container = new ContainerBuilder()
-                        .setAccentColor(colours.onyx)
-                        .addTextDisplayComponents(
-                            new TextDisplayBuilder().setContent(`## 🗂️ Saved Accounts\nManage all your saved accounts. You can save accounts by clicking on the \`Save Account\` button at the homework selection on one of our services, this option only appears if you **did not** login with cookies.\n### Warning: Changing your Master Password will delete all saved accounts!`)
+                const settingBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('settings')
+                        .setLabel('Settings')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.settings
+                );
+
+                const freetrialBtn = new ButtonBuilder()
+                    .setCustomId('activate_free_trial')
+                    .setLabel('Activate Free Trial')
+                    .setEmoji({ name: '✅' })
+                    .setStyle(ButtonStyle.Success);
+
+                const row = makeRow(statsBtn, savedBtn);
+                const row2 = makeRow(mainBtn, settingBtn);
+
+                if (account.free_trial_start === null && !account.license) {
+                    row2.addComponents(freetrialBtn);
+                }
+
+                const message = await interaction.editReply({
+                    embeds: [
+                        makeEmbed(
+                            `${interaction.user.username}'s Account`,
+                            `**Total Usage:** You have used the bot a total of **${totalUses}** times.\n` +
+                            `**Slots Limit:** You have an account slots limit of **${account.slots}**.\n` +
+                            `**Account Rank:** Your current account rank is **${account.license ?? 'None'}**.\n\n` +
+                            `**Account Slots (Last 24 Hours)**\n\`\`\`js\n${usages || 'No slots used in the past 24 Hours'}\n\`\`\``
                         )
-                        .addSeparatorComponents(
-                            seperator
-                        )
-                        .addActionRowComponents(
-                            row
-                        );
+                    ],
+                    components: [row, row2]
+                });
 
-                    const message_sent = await buttonInteraction.followUp({
-                        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                        components: [container],
-                        fetchReply: true
-                    });
+                const collector = message.createMessageComponentCollector({
+                    componentType: ComponentType.Button,
+                    time: 900000
+                });
 
-                    const collector = message_sent.createMessageComponentCollector({
-                        componentType: ComponentType.Button
-                    });
-
-                    collector.on('collect', async (accountInteraction) => {
-                        const buttons = [];
-                        const schoolInput = new TextInputBuilder()
-                            .setCustomId('master_password')
-                            .setLabel("Master Password")
-                            .setStyle(TextInputStyle.Short);
-
-                        buttons.push(schoolInput);
-                        if (accountInteraction.customId === 'view_accounts') {
-                            const modal = new ModalBuilder()
-                                .setCustomId('view_accounts')
-                                .setTitle('Saved Accounts Login');
-
-                            for (const button of buttons) {
-                                modal.addComponents(new ActionRowBuilder().addComponents(button));
-                            }
-
-                            await accountInteraction.showModal(modal);
-                        } else if (accountInteraction.customId === 'change_master_password') {
-                            const modal = new ModalBuilder()
-                                .setCustomId('change_master_password')
-                                .setTitle('Change Master Password');
-
-                            for (const button of buttons) {
-                                modal.addComponents(new ActionRowBuilder().addComponents(button));
-                            }
-
-                            await accountInteraction.showModal(modal);
+                collector.on('collect', async buttonInteraction => {
+                    try {
+                        if (buttonInteraction.user.id !== interaction.user.id) {
+                            await buttonInteraction.reply({
+                                content: 'This account menu is not yours.',
+                                flags: 64
+                            });
+                            return;
                         }
 
-                    });
-                } else if (buttonInteraction.customId === 'configure_main_accounts') {
-                    let configured = '';
-                    const mainAccountsConfigured = [];
-                    for (const mainAccount of Object.keys(account.main_accounts)) {
-                        configured += `${mainAccount.charAt(0).toUpperCase() + mainAccount.slice(1)}: Configured\n`;
-                        mainAccountsConfigured.push(mainAccount);
-                    }
+                        // SETTINGS
+                        if (buttonInteraction.customId === 'settings') {
+                            const modal = new ModalBuilder()
+                                .setCustomId('handleSettings')
+                                .setTitle('Settings for Platform...');
 
-                    // Added await since getPlatformNames is now async
-                    const platforms = await getPlatformNames(); 
-                    
-                    const filteredPlatforms = platforms.filter(item => !mainAccountsConfigured.includes(item.value));
-                    const statsBtn = new ButtonBuilder()
-                        .setCustomId("add_main_account")
-                        .setLabel('Add Main Account')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setEmoji(emojis.main_accounts);
-
-                    const cookieBtn = new ButtonBuilder()
-                        .setCustomId("add_main_account_cookie")
-                        .setLabel('Add Main Account')
-                        .setStyle(ButtonStyle.Secondary)
-                        .setEmoji(emojis.cookies);
-
-                    const row = new ActionRowBuilder().addComponents(statsBtn, cookieBtn);
-
-                    const container = new ContainerBuilder()
-                        .setAccentColor(colours.onyx)
-                        .addTextDisplayComponents(
-                            new TextDisplayBuilder().setContent(`## 🔒 Configure Main Accounts\nConfigure your main accounts for each platform. Main accounts do **not** count towards your accounts slots. **Your main accounts should only be your own personal accounts**, this is so you can still do *your* homework if you use up your daily slots and it is also used to prevent free trial abusing.\n### Main Accounts Configured\n\`\`\`js\n${configured || 'You have no Main Accounts Configured'}\`\`\`\n### Warning: Configuring a Main Account is irreversible!`)
-                        )
-                        .addSeparatorComponents(
-                            seperator
-                        );
-
-                    if (filteredPlatforms.length) {
-                        container.addActionRowComponents(
-                            row
-                        );
-                    }
-
-                    const message_sent = await buttonInteraction.followUp({
-                        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                        components: [container],
-                        fetchReply: true
-                    });
-
-                    const collector = message_sent.createMessageComponentCollector({
-                        componentType: ComponentType.Button
-                    });
-
-                    collector.on('collect', async (accountInteraction) => {
-                        
-                        const modal = new ModalBuilder()
-                            .setCustomId('main_account_configure')
-                            .setTitle('Main Account Configuration');
-
-                        const sparxInput = new StringSelectMenuBuilder()
-                            .setCustomId('platform')
-                            .setPlaceholder("Platform")
-                            .addOptions(
-                                ...filteredPlatforms
-                            );
-
-                        const sparxLabel = new LabelBuilder({
-                            label: 'Platform',
-                            component: sparxInput
-                        });
-
-                        modal.addLabelComponents(sparxLabel);
-
-                        if (accountInteraction.customId === 'add_main_account') { 
-                            const schoolInput = new TextInputBuilder()
-                                .setCustomId('school')
-                                .setLabel("School")
-                                .setPlaceholder('If needed for login')
-                                .setRequired(false)
-                                .setStyle(TextInputStyle.Short);
-
-                            const emailInput = new TextInputBuilder()
-                                .setCustomId('username')
-                                .setLabel("Username")
-                                .setStyle(TextInputStyle.Short);
-
-                            const passwordInput = new TextInputBuilder()
-                                .setCustomId('password')
-                                .setLabel("Password")
-                                .setStyle(TextInputStyle.Short);
-
-                            const typeInput = new StringSelectMenuBuilder()
-                                .setCustomId('type')
-                                .setPlaceholder("Normal/Microsoft/Google (If needed for login)")
+                            const platformInput = new StringSelectMenuBuilder()
+                                .setCustomId('platform')
+                                .setPlaceholder('Platform')
                                 .addOptions(
-                                    { label: "Normal", value: "Normal", emoji: emojis.sparx },
-                                    { label: "Microsoft", value: "Microsoft", emoji: emojis.microsoft },
-                                    { label: "Google", value: "Google", emoji: emojis.google }
+                                    { label: 'General', value: 'general' },
+                                    { label: 'Reader', value: 'reader', emoji: emojis.reader },
+                                    { label: 'Maths', value: 'maths', emoji: emojis.maths },
+                                    { label: 'Science', value: 'science', emoji: emojis.science }
                                 );
 
-                            const buttons = [schoolInput, emailInput, passwordInput];
-                            const typeLabel = new LabelBuilder({
-                                label: 'Login Type',
-                                component: typeInput
+                            modal.addLabelComponents(
+                                new LabelBuilder({
+                                    label: 'Platform',
+                                    component: platformInput
+                                })
+                            );
+
+                            await buttonInteraction.showModal(modal);
+                            return;
+                        }
+
+                        await buttonInteraction.deferUpdate();
+
+                        // VIEW STATS
+                        if (buttonInteraction.customId === 'view_stats') {
+                            await buttonInteraction.followUp({
+                                flags: 64,
+                                embeds: [
+                                    makeEmbed(
+                                        '📊 Statistics',
+                                        `**Total Usage:** ${totalUses} times.\n` +
+                                        `**Time Saved:** ${formatTime(timeSaved)}.\n\n` +
+                                        `**Platform Usage**\n\`\`\`js\n${platformsUsed || 'No platform usage'}\n\`\`\`\n` +
+                                        `**Time Saved**\n\`\`\`js\n${timeSavedPlatforms || 'No time saved data'}\n\`\`\``
+                                    )
+                                ]
+                            });
+                        }
+
+                        // SAVED ACCOUNTS
+                        else if (buttonInteraction.customId === 'manage_saved_accounts') {
+                            const viewBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('view_accounts')
+                                    .setLabel('View Accounts')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.accounts
+                            );
+
+                            const changeBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('change_master_password')
+                                    .setLabel('Change Master Password')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.key,
+                                '🔑'
+                            );
+
+                            const savedMessage = await buttonInteraction.followUp({
+                                flags: 64,
+                                embeds: [
+                                    makeEmbed(
+                                        '🗂️ Saved Accounts',
+                                        'Manage all your saved accounts. You can save accounts by clicking on the `Save Account` button at the homework selection on one of our services. This option only appears if you **did not** login with cookies.\n\n' +
+                                        '**Warning:** Changing your Master Password will delete all saved accounts!'
+                                    )
+                                ],
+                                components: [makeRow(viewBtn, changeBtn)],
+                                fetchReply: true
                             });
 
-                            for (const button of buttons) {
-                                modal.addComponents(new ActionRowBuilder().addComponents(button));
+                            const savedCollector = savedMessage.createMessageComponentCollector({
+                                componentType: ComponentType.Button,
+                                time: 900000
+                            });
+
+                            savedCollector.on('collect', async accountInteraction => {
+                                try {
+                                    if (accountInteraction.user.id !== interaction.user.id) {
+                                        await accountInteraction.reply({
+                                            content: 'This menu is not yours.',
+                                            flags: 64
+                                        });
+                                        return;
+                                    }
+
+                                    const passwordInput = new TextInputBuilder()
+                                        .setCustomId('master_password')
+                                        .setLabel('Master Password')
+                                        .setStyle(TextInputStyle.Short);
+
+                                    const modal = new ModalBuilder()
+                                        .setCustomId(accountInteraction.customId)
+                                        .setTitle(
+                                            accountInteraction.customId === 'view_accounts'
+                                                ? 'Saved Accounts Login'
+                                                : 'Change Master Password'
+                                        )
+                                        .addComponents(
+                                            new ActionRowBuilder().addComponents(passwordInput)
+                                        );
+
+                                    await accountInteraction.showModal(modal);
+                                } catch (error) {
+                                    console.error('Saved accounts button error:', error);
+                                }
+                            });
+                        }
+
+                        // MAIN ACCOUNTS
+                        else if (buttonInteraction.customId === 'configure_main_accounts') {
+                            let configured = '';
+
+                            for (const mainAccount of Object.keys(account.main_accounts || {})) {
+                                configured +=
+                                    `${mainAccount.charAt(0).toUpperCase() + mainAccount.slice(1)}: Configured\n`;
                             }
-                            modal.addLabelComponents(typeLabel);
-                        } else if (accountInteraction.customId === 'add_main_account_cookie') {
-                            const usernameInput = new TextInputBuilder()
-                                .setCustomId('cookie')
-                                .setLabel('Cookie')
-                                .setStyle(TextInputStyle.Paragraph)
-                                .setRequired(true);
 
-                            const usernameRow = new ActionRowBuilder().addComponents(usernameInput);
-                            modal.addComponents(usernameRow);
+                            const addBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('add_main_account')
+                                    .setLabel('Add Main Account')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.main_accounts
+                            );
+
+                            const cookieBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('add_main_cookie_account')
+                                    .setLabel('Add Main Account with Cookies (Sparx Only)')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.cookies
+                            );
+
+                            const mainMessage = await buttonInteraction.followUp({
+                                flags: 64,
+                                embeds: [
+                                    makeEmbed(
+                                        '🔒 Configure Main Accounts',
+                                        'Configure your main accounts for each platform. Main accounts do **not** count towards your account slots.\n\n' +
+                                        '**Your main accounts should only be your own personal accounts.** This is so you can still do *your* homework if you use up your daily slots and it is also used to prevent free trial abusing.\n\n' +
+                                        `**Main Accounts Configured**\n\`\`\`js\n${configured || 'You have no Main Accounts Configured'}\n\`\`\`\n` +
+                                        '**Warning:** Configuring a Main Account is irreversible!'
+                                    )
+                                ],
+                                components: [makeRow(addBtn, cookieBtn)],
+                                fetchReply: true
+                            });
+
+                            const mainCollector = mainMessage.createMessageComponentCollector({
+                                componentType: ComponentType.Button,
+                                time: 900000
+                            });
+
+                            mainCollector.on('collect', async accountInteraction => {
+                                try {
+                                    if (accountInteraction.user.id !== interaction.user.id) {
+                                        await accountInteraction.reply({
+                                            content: 'This menu is not yours.',
+                                            flags: 64
+                                        });
+                                        return;
+                                    }
+
+                                    const modal = new ModalBuilder()
+                                        .setCustomId('main_account_configure')
+                                        .setTitle('Main Account Configuration');
+
+                                    if (accountInteraction.customId === 'add_main_account') {
+                                        const schoolInput = new TextInputBuilder()
+                                            .setCustomId('school')
+                                            .setLabel('School')
+                                            .setPlaceholder('If needed for login')
+                                            .setRequired(false)
+                                            .setStyle(TextInputStyle.Short);
+
+                                        const emailInput = new TextInputBuilder()
+                                            .setCustomId('email')
+                                            .setLabel('Email Address/Username')
+                                            .setStyle(TextInputStyle.Short);
+
+                                        const passwordInput = new TextInputBuilder()
+                                            .setCustomId('password')
+                                            .setLabel('Password')
+                                            .setStyle(TextInputStyle.Short);
+
+                                        const typeInput = new StringSelectMenuBuilder()
+                                            .setCustomId('type')
+                                            .setPlaceholder('Normal/Microsoft/Google (If needed for login)')
+                                            .addOptions(
+                                                { label: 'Normal', value: 'Normal', emoji: emojis.sparx },
+                                                { label: 'Microsoft', value: 'Microsoft', emoji: emojis.microsoft },
+                                                { label: 'Google', value: 'Google', emoji: emojis.google }
+                                            );
+
+                                        const platformInput = new StringSelectMenuBuilder()
+                                            .setCustomId('platform')
+                                            .setPlaceholder('Platform')
+                                            .addOptions(
+                                                { label: 'Reader', value: 'reader', emoji: emojis.reader },
+                                                { label: 'Maths', value: 'maths', emoji: emojis.maths },
+                                                { label: 'Science', value: 'science', emoji: emojis.science },
+                                                { label: 'LanguageNut', value: 'languagenut', emoji: emojis.languagenut },
+                                                { label: 'Educake', value: 'educake', emoji: emojis.educake },
+                                                { label: 'Seneca', value: 'seneca', emoji: emojis.seneca },
+                                                { label: 'DrFrost', value: 'drfrost', emoji: emojis.drfrost }
+                                            );
+
+                                        modal.addLabelComponents(
+                                            new LabelBuilder({
+                                                label: 'Platform',
+                                                component: platformInput
+                                            })
+                                        );
+
+                                        modal.addComponents(
+                                            new ActionRowBuilder().addComponents(schoolInput),
+                                            new ActionRowBuilder().addComponents(emailInput),
+                                            new ActionRowBuilder().addComponents(passwordInput)
+                                        );
+
+                                        modal.addLabelComponents(
+                                            new LabelBuilder({
+                                                label: 'Login Type',
+                                                component: typeInput
+                                            })
+                                        );
+
+                                    } else if (accountInteraction.customId === 'add_main_cookie_account') {
+                                        const cookieInput = new TextInputBuilder()
+                                            .setCustomId('cookies')
+                                            .setLabel('Cookies String')
+                                            .setStyle(TextInputStyle.Paragraph);
+
+                                        modal.addComponents(
+                                            new ActionRowBuilder().addComponents(cookieInput)
+                                        );
+                                    } else {
+                                        return;
+                                    }
+
+                                    await accountInteraction.showModal(modal);
+                                } catch (error) {
+                                    console.error('Main account button error:', error);
+                                }
+                            });
                         }
 
-                        await accountInteraction.showModal(modal);
-                    });
+                        // FREE TRIAL
+                        else if (buttonInteraction.customId === 'activate_free_trial') {
+                            if (!Object.keys(account.main_accounts || {}).length) {
+                                await buttonInteraction.followUp({
+                                    flags: 64,
+                                    embeds: [
+                                        makeEmbed(
+                                            'No Main Accounts Exist',
+                                            'You have no main accounts configured. Please configure at least one main account to activate your free trial. If you have just configured a main account, please run `/account` again.',
+                                            0xFF474D
+                                        )
+                                    ]
+                                });
 
-                } else if (buttonInteraction.customId === 'activate_free_trial') {
-                    if (!Object.keys(account.main_accounts).length) {
-                        const container = new ContainerBuilder()
-                            .setAccentColor(colours.light_red)
-                            .addTextDisplayComponents(
-                                new TextDisplayBuilder().setContent(`### No Main Accounts Exist\nYou have no main accounts configured. Please configure at least one main account to activate your free trial. If you have *just* configured a main account, please run the command \`/account\` again.`)
+                                return;
+                            }
+
+                            const freeTrialActivated = await activateFreeTrial(
+                                buttonInteraction.user.id
                             );
 
-                        await buttonInteraction.followUp({
-                            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                            components: [container]
-                        });
+                            if (freeTrialActivated) {
+                                const freeTrialRoleId = queueRanksPositions['free-trial'];
 
-                        return;
-                    }
-                    const freeTrailActivatedSuccess = await activateFreeTrial(buttonInteraction.user.id);
-                    if (freeTrailActivatedSuccess) {
-                        const freetrialRoleId = queueRanksPositions["free-trial"];
+                                try {
+                                    if (freeTrialRoleId) {
+                                        await buttonInteraction.member.roles.add(freeTrialRoleId);
+                                    }
+                                } catch (error) {
+                                    console.error('Free trial role error:', error);
+                                }
 
-                        try {
-                            await interaction.member.roles.add(freetrialRoleId);
-                        } catch (error) {
-                            console.error(error);
+                                await buttonInteraction.followUp({
+                                    flags: 64,
+                                    embeds: [
+                                        makeEmbed(
+                                            'Free Trial Activated',
+                                            'Your 3-day Free Trial for SparxNow has been successfully activated!',
+                                            0x90EE90
+                                        )
+                                    ]
+                                });
+
+                            } else {
+                                await buttonInteraction.followUp({
+                                    flags: 64,
+                                    embeds: [
+                                        makeEmbed(
+                                            'Free Trial Already Exists',
+                                            'You already activated your Free Trial.',
+                                            0xFF474D
+                                        )
+                                    ]
+                                });
+                            }
                         }
 
-                        const container = new ContainerBuilder()
-                            .setAccentColor(colours.light_green)
-                            .addTextDisplayComponents(
-                                new TextDisplayBuilder().setContent(`### Free Trial Activated\nYour 3-day Free Trial for ${name} has been successfully activated!`)
+                    } catch (error) {
+                        console.error('Account button interaction error:', error);
+                    }
+                });
+
+            }
+
+            // ==========================================
+            // CREATE ACCOUNT
+            // ==========================================
+
+            else {
+                const agreeBtn = new ButtonBuilder()
+                    .setCustomId('agree')
+                    .setLabel('I Agree')
+                    .setEmoji({ name: '✅' })
+                    .setStyle(ButtonStyle.Success);
+
+                const message = await interaction.editReply({
+                    embeds: [
+                        makeEmbed(
+                            'Create an Account',
+                            'By creating an account, you agree to the Terms of Service of SparxNow which can be found at https://discord.com/channels/1351338824759906345/1446936637627043932'
+                        )
+                    ],
+                    components: [makeRow(agreeBtn)]
+                });
+
+                const collector = message.createMessageComponentCollector({
+                    componentType: ComponentType.Button,
+                    time: 900000
+                });
+
+                collector.on('collect', async buttonInteraction => {
+                    try {
+                        if (buttonInteraction.user.id !== interaction.user.id) {
+                            await buttonInteraction.reply({
+                                content: 'This account menu is not yours.',
+                                flags: 64
+                            });
+                            return;
+                        }
+
+                        // I AGREE BUTTON
+                        if (buttonInteraction.customId === 'agree') {
+                            const createBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('create_master_password')
+                                    .setLabel('Create Master Password')
+                                    .setStyle(ButtonStyle.Primary),
+                                emojis.key,
+                                '🔑'
                             );
 
-                        await buttonInteraction.followUp({
-                            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                            components: [container]
-                        });
-                    } else {
+                            // Update the original message immediately.
+                            await buttonInteraction.update({
+                                embeds: [
+                                    makeEmbed(
+                                        'Create Master Password',
+                                        'Create a Master Password that will be used whenever you choose to save an account on one of our services. The option to save an account will be provided at the homework selection, assuming you **did not** login with cookies.\n\n' +
+                                        'You will be prompted to input your Master Password whenever you try to save an account.\n\n' +
+                                        'The Master Password stored in the Database is hashed and all saved account data is encrypted. Consequently, we **cannot view your saved accounts or master password**, meaning all saved accounts are deleted when changing the Master Password.'
+                                    )
+                                ],
+                                components: [makeRow(createBtn)]
+                            });
 
-                        const container = new ContainerBuilder()
-                            .setAccentColor(colours.light_red)
-                            .addTextDisplayComponents(
-                                new TextDisplayBuilder().setContent(`### Free Trial Already Exists\nYou already activated your Free Trial.`)
-                            );
+                            return;
+                        }
 
-                        await buttonInteraction.followUp({
-                            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                            components: [container]
-                        });
+                        // CREATE MASTER PASSWORD BUTTON
+                        if (buttonInteraction.customId === 'create_master_password') {
+                            const passwordInput = new TextInputBuilder()
+                                .setCustomId('master_password')
+                                .setLabel('Master Password')
+                                .setStyle(TextInputStyle.Short);
+
+                            const modal = new ModalBuilder()
+                                .setCustomId('create_master_password')
+                                .setTitle('Create Master Password')
+                                .addComponents(
+                                    new ActionRowBuilder().addComponents(passwordInput)
+                                );
+
+                            await buttonInteraction.showModal(modal);
+                        }
+
+                    } catch (error) {
+                        console.error('Account creation button error:', error);
+
+                        if (!buttonInteraction.replied && !buttonInteraction.deferred) {
+                            try {
+                                await buttonInteraction.reply({
+                                    content: 'Something went wrong. Please try `/account` again.',
+                                    flags: 64
+                                });
+                            } catch (replyError) {
+                                console.error('Could not reply to account button:', replyError);
+                            }
+                        }
                     }
-                }
-            });
-        } else {
-            const statsBtn = new ButtonBuilder()
-                .setCustomId('agree')
-                .setLabel('I Agree')
-                .setEmoji(emojis.tick)
-                .setStyle(ButtonStyle.Success);
+                });
+            }
 
-            const row = new ActionRowBuilder().addComponents(statsBtn);
+        } catch (error) {
+            console.error('Error executing account:', error);
 
-            // 3. Assemble everything into the main container
-            const container = new ContainerBuilder()
-                .setAccentColor(colours.onyx)
-                .addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(`## Create an Account\nBy creating an account, you agree to the Terms of Service of ${name} which can be found at ${config.tos_channel}`)
-                )
-                .addSeparatorComponents(
-                    seperator
-                )
-                .addActionRowComponents(
-                    row
-                );
-
-            const message_sent = await interaction.reply({
-                flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                components: [container],
-                fetchReply: true
-            });
-
-            const collector = message_sent.createMessageComponentCollector({
-                componentType: ComponentType.Button
-            });
-
-            collector.on('collect', async (buttonInteraction) => {
-                if (buttonInteraction.customId === 'agree') {
-                    await buttonInteraction.deferUpdate();
-
-                    const statsBtn = new ButtonBuilder()
-                        .setCustomId('create_master_password')
-                        .setLabel('Create Master Password')
-                        .setEmoji(emojis.key)
-                        .setStyle(ButtonStyle.Primary);
-
-                    const row = new ActionRowBuilder().addComponents(statsBtn);
-                    // 3. Assemble everything into the main container
-                    const container = new ContainerBuilder()
-                        .setAccentColor(colours.onyx)
-                        .addTextDisplayComponents(
-                            new TextDisplayBuilder().setContent(`## Create Master Password\nCreate a Master Password that will be used whenever you choose to save an account one of our services. The option to save an account will be provided at the homework selection assuming you **did not** login with cookies. You will be prompted to input your Master Password whenever you try to save an account.\n\nThe Master Password stored in the Database is hashed and all saved account data is encrypted. Consequently, we **cannot view your saved accounts or master password** meaning all saved accounts are deleted when changing the Master Password.`)
-                        )
-                        .addSeparatorComponents(
-                            seperator
-                        )
-                        .addActionRowComponents(
-                            row
-                        );
-
-                    await buttonInteraction.editReply({
-                        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-                        components: [container]
-                    });
-                } else if (buttonInteraction.customId === 'create_master_password') {
-                    const buttons = [];
-                    const schoolInput = new TextInputBuilder()
-                        .setCustomId('master_password')
-                        .setLabel("Master Password")
-                        .setStyle(TextInputStyle.Short);
-
-                    buttons.push(schoolInput);
-                    const modal = new ModalBuilder()
-                        .setCustomId('create_master_password')
-                        .setTitle('Saved Accounts Login');
-
-                    for (const button of buttons) {
-                        modal.addComponents(new ActionRowBuilder().addComponents(button));
-                    }
-
-                    await buttonInteraction.showModal(modal);
-                }
-            });
+            try {
+                await interaction.editReply({
+                    content: 'An error occurred while loading your account. Please try again.',
+                    embeds: [],
+                    components: []
+                });
+            } catch (replyError) {
+                console.error('Could not send account error:', replyError);
+            }
         }
-    },
+    }
 };
