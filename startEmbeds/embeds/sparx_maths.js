@@ -1,4 +1,7 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, ThumbnailBuilder, SectionBuilder } = require('discord.js');
+const info = require('../info');
+
+console.log('EMOJI CHECK', JSON.stringify(info.emojis.login), JSON.stringify(info.emojis.queue));
 
 const seperator = new SeparatorBuilder({
     spacing: SeparatorSpacingSize.Small
@@ -16,12 +19,12 @@ const mathButtons = new ActionRowBuilder()
             .setCustomId('sparx_maths_show_login')
             .setLabel('Login')
             .setStyle(ButtonStyle.Success)
-            .setEmoji({ name: '🔑' }),
+            .setEmoji(info.emojis.login),
         new ButtonBuilder()
             .setCustomId('check_queue_maths')
             .setLabel('Check Queue')
             .setStyle(ButtonStyle.Primary)
-            .setEmoji({ name: '📋' })
+            .setEmoji(info.emojis.queue)
     );
 
 const container = new ContainerBuilder()
