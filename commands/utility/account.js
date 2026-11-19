@@ -404,7 +404,7 @@ module.exports = {
             const statsBtn = new ButtonBuilder()
                 .setCustomId('agree')
                 .setLabel('I Agree')
-                .setEmoji(emojis.tick)
+                .setEmoji({ name: '✅' })
                 .setStyle(ButtonStyle.Success);
 
             const row = new ActionRowBuilder().addComponents(statsBtn);
