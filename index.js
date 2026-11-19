@@ -4,7 +4,7 @@ const ADMIN_ROLE = process.env.ADMIN_ROLE;
 const fs = require('node:fs');
 const fspromise = require('fs').promises;
 const path = require('node:path');
-const { Client, GatewayIntentBits, EmbedBuilder, Collection, ActionRowBuilder, ButtonBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, Collection, ActionRowBuilder, ButtonBuilder, REST, Routes } = require('discord.js');
 const { logError } = require('./utils/errorLogger.js');
 const { executeViewAccounts, saveAccount } = require('./handlers/savedAccountsHandler.js');
 const { educake_collector, educake_model_executor } = require('./educake/main.js');
@@ -38,6 +38,8 @@ console.log = function (...args) {
 };
 
 async function cleanLogs(dir = 'logs') {
+    // Create the folder if it doesn't exist (fixes ENOENT on Railway)
+    await fspromise.mkdir(dir, { recursive: true });
     const entries = await fspromise.readdir(dir, { withFileTypes: true });
 
     for (const entry of entries) {
@@ -51,7 +53,7 @@ async function cleanLogs(dir = 'logs') {
     }
 }
 
-cleanLogs();
+cleanLogs().catch(err => console.error('cleanLogs failed:', err));
 
 const { executeTasks } = require('./executeTasks.js');
 const { languagenut_model_executor, languagenut_collector } = require('./languagenut/main.js');
@@ -123,6 +125,18 @@ for (const folder of commandFolders) {
         } else {
             console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
         }
+    }
+}
+
+// Register slash commands with Discord automatically on startup
+async function registerSlashCommands() {
+    try {
+        const rest = new REST().setToken(token);
+        const commands = client.commands.map(c => c.data.toJSON());
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log(`Registered ${commands.length} commands`);
+    } catch (err) {
+        console.error('Command registration failed:', err);
     }
 }
 
@@ -216,6 +230,7 @@ async function DeleteVideos() {
 
 client.once("clientReady", async () => {
     console.log("Bot has connected to discord");
+    await registerSlashCommands();
     await sendPersistentEmbeds(client);
     await DeleteVideos();
 });
