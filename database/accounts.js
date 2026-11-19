@@ -3,7 +3,6 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const config = require('../config.json');
 const hashCompare = require('../utils/hashCompare');
-const withRetry = require('../utils/withRetry');
 
 const supabaseUrl = process.env.SUPABASEURL;
 const supabaseKey = process.env.SUPABASEKEY;
@@ -14,7 +13,7 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Replaces the missing database/general.js updateDB function.
+// Replacement for the missing database/general.js updateDB function.
 async function updateDB(table, data, column, value) {
     const { data: updatedData, error } = await supabase
         .from(table)
@@ -75,19 +74,17 @@ async function removeMainAccount(discordId, platform) {
 
     const currentAccounts = data.main_accounts || {};
 
-    if (currentAccounts[platform]) {
-        delete currentAccounts[platform];
+    if (!currentAccounts[platform]) return false;
 
-        await supabase
-            .from('accounts')
-            .update({ main_accounts: currentAccounts })
-            .eq('discord_id', discordId)
-            .throwOnError();
+    delete currentAccounts[platform];
 
-        return true;
-    }
+    await supabase
+        .from('accounts')
+        .update({ main_accounts: currentAccounts })
+        .eq('discord_id', discordId)
+        .throwOnError();
 
-    return false;
+    return true;
 }
 
 async function checkDuplicatesMainAccounts(platform, accountId, discordId, checkSelf = false) {
@@ -226,7 +223,9 @@ async function updateStats(discord_id, platform, time_saved) {
         throw new Error(`No account found for Discord ID ${discord_id}`);
     }
 
-    if (!account.total_usage) account.total_usage = {};
+    if (!account.total_usage) {
+        account.total_usage = {};
+    }
 
     if (!account.total_usage[platform]) {
         account.total_usage[platform] = {
@@ -256,15 +255,15 @@ async function setDefault(table, column) {
 }
 
 module.exports = {
-    addToDb: withRetry(addToDb),
-    setDefault: withRetry(setDefault),
-    updateStats: withRetry(updateStats),
-    removeMainAccount: withRetry(removeMainAccount),
-    getAudit: withRetry(getAudit),
-    clearSpecificService: withRetry(clearSpecificService),
-    resetAllUses: withRetry(resetAllUses),
-    checkDuplicatesMainAccounts: withRetry(checkDuplicatesMainAccounts),
-    checkAccount: withRetry(checkAccount),
-    addMainAccount: withRetry(addMainAccount),
-    activateFreeTrial: withRetry(activateFreeTrial)
+    addToDb,
+    setDefault,
+    updateStats,
+    removeMainAccount,
+    getAudit,
+    clearSpecificService,
+    resetAllUses,
+    checkDuplicatesMainAccounts,
+    checkAccount,
+    addMainAccount,
+    activateFreeTrial
 };
