@@ -13,7 +13,9 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Replacement for the missing database/general.js updateDB function.
+const accountSlots = config.slots || {};
+
+// Update database records.
 async function updateDB(table, data, column, value) {
     const { data: updatedData, error } = await supabase
         .from(table)
@@ -26,50 +28,68 @@ async function updateDB(table, data, column, value) {
     return updatedData;
 }
 
+// Create a new account.
 async function addToDb(discord_id, master_password, license) {
-    if ((await checkAccount(discord_id)) !== null) return false;
+    const existingAccount = await checkAccount(discord_id);
 
-    await supabase
+    if (existingAccount) return false;
+
+    const slots = accountSlots[license] ?? 0;
+
+    const { error } = await supabase
         .from('accounts')
         .insert([{
             discord_id,
             master_password,
-            license,
-            slots: config.slots[license] ?? 0
-        }])
-        .throwOnError();
+            license: license ?? null,
+            slots,
+            uses: {},
+            main_accounts: {},
+            total_usage: {},
+            custom_slots: false
+        }]);
+
+    if (error) {
+        if (error.code === '23505') return false;
+        throw error;
+    }
 
     return true;
 }
 
+// Reset usage for all accounts.
 async function resetAllUses() {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('accounts')
         .update({ uses: {} })
         .not('discord_id', 'is', null)
-        .select()
-        .throwOnError();
+        .select();
+
+    if (error) throw error;
 
     return data;
 }
 
+// Retrieve account audit information.
 async function getAudit() {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('accounts')
-        .select('discord_id, license, free_trial_start')
-        .throwOnError();
+        .select('discord_id, license, free_trial_start');
+
+    if (error) throw error;
 
     return data;
 }
 
+// Remove a main account.
 async function removeMainAccount(discordId, platform) {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('accounts')
         .select('main_accounts')
         .eq('discord_id', discordId)
-        .maybeSingle()
-        .throwOnError();
+        .maybeSingle();
 
+    if (error) throw error;
     if (!data) return false;
 
     const currentAccounts = data.main_accounts || {};
@@ -78,22 +98,28 @@ async function removeMainAccount(discordId, platform) {
 
     delete currentAccounts[platform];
 
-    await supabase
-        .from('accounts')
-        .update({ main_accounts: currentAccounts })
-        .eq('discord_id', discordId)
-        .throwOnError();
+    await updateDB(
+        'accounts',
+        { main_accounts: currentAccounts },
+        'discord_id',
+        discordId
+    );
 
     return true;
 }
 
-async function checkDuplicatesMainAccounts(platform, accountId, discordId, checkSelf = false) {
-    const { data } = await supabase
+// Check whether a main account is already used.
+async function checkDuplicatesMainAccounts(
+    platform,
+    accountId,
+    discordId,
+    checkSelf = false
+) {
+    const { data, error } = await supabase
         .from('accounts')
-        .select('discord_id, main_accounts')
-        .throwOnError();
+        .select('discord_id, main_accounts');
 
-    let matchDiscordId = null;
+    if (error) throw error;
 
     for (const row of data || []) {
         const mainAccounts = row.main_accounts || {};
@@ -108,15 +134,15 @@ async function checkDuplicatesMainAccounts(platform, accountId, discordId, check
             );
 
             if (isMatch) {
-                matchDiscordId = row.discord_id;
-                break;
+                return row.discord_id;
             }
         }
     }
 
-    return matchDiscordId;
+    return null;
 }
 
+// Add a main account.
 async function addMainAccount(discord_id, platform, accountId) {
     const account = await checkAccount(discord_id);
 
@@ -128,75 +154,89 @@ async function addMainAccount(discord_id, platform, accountId) {
 
     mainAccounts[platform] = accountId;
 
-    await supabase
-        .from('accounts')
-        .update({ main_accounts: mainAccounts })
-        .eq('discord_id', discord_id)
-        .throwOnError();
+    await updateDB(
+        'accounts',
+        { main_accounts: mainAccounts },
+        'discord_id',
+        discord_id
+    );
 
     return true;
 }
 
+// Activate a free trial.
 async function activateFreeTrial(discord_id) {
     const account = await checkAccount(discord_id);
 
     if (!account) return false;
-    if (account.free_trial_start !== null) return false;
+    if (account.free_trial_start) return false;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
         .from('accounts')
-        .update({ free_trial_start: new Date().toISOString() })
-        .eq('discord_id', discord_id);
+        .update({
+            free_trial_start: new Date().toISOString()
+        })
+        .eq('discord_id', discord_id)
+        .is('free_trial_start', null)
+        .select('discord_id')
+        .maybeSingle();
 
-    if (error) {
-        throw new Error(`Failed to activate free trial: ${error.message}`);
-    }
+    if (error) throw error;
 
-    return true;
+    return Boolean(data);
 }
 
+// Clear a specific service from all main accounts.
 async function clearSpecificService(service) {
-    const { data: accounts, error: fetchError } = await supabase
+    const { data: accounts, error } = await supabase
         .from('accounts')
         .select('discord_id, main_accounts');
 
-    if (fetchError) throw fetchError;
+    if (error) throw error;
 
-    const updates = (accounts || []).map(async (account) => {
-        const jsonData = account.main_accounts || {};
+    const updates = (accounts || []).map(async account => {
+        const mainAccounts = account.main_accounts || {};
 
-        if (jsonData[service]) {
-            delete jsonData[service];
+        if (mainAccounts[service]) {
+            delete mainAccounts[service];
 
-            await supabase
-                .from('accounts')
-                .update({ main_accounts: jsonData })
-                .eq('discord_id', account.discord_id)
-                .throwOnError();
+            await updateDB(
+                'accounts',
+                { main_accounts: mainAccounts },
+                'discord_id',
+                account.discord_id
+            );
         }
     });
 
     await Promise.all(updates);
 }
 
+// Find an account by Discord ID.
+// Only update the rank when a real rank is supplied.
 async function checkAccount(discord_id, license) {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('accounts')
         .select('*')
         .eq('discord_id', discord_id)
-        .maybeSingle()
-        .throwOnError();
+        .maybeSingle();
 
+    if (error) throw error;
     if (!data) return null;
 
-    if (license !== undefined && data.license !== license) {
-        const dataToChange = { license };
+    if (license !== undefined && license !== null && data.license !== license) {
+        const dataToChange = {
+            license
+        };
+
+        const configuredSlots = accountSlots[license];
 
         if (
             !data.custom_slots &&
-            data.slots !== config.slots[license]
+            Number.isFinite(configuredSlots) &&
+            data.slots !== configuredSlots
         ) {
-            dataToChange.slots = config.slots[license];
+            dataToChange.slots = configuredSlots;
         }
 
         await updateDB(
@@ -206,16 +246,17 @@ async function checkAccount(discord_id, license) {
             discord_id
         );
 
-        if (Number.isFinite(dataToChange.slots)) {
+        data.license = license;
+
+        if (dataToChange.slots !== undefined) {
             data.slots = dataToChange.slots;
         }
-
-        data.license = license;
     }
 
     return data;
 }
 
+// Update account usage statistics.
 async function updateStats(discord_id, platform, time_saved) {
     const account = await checkAccount(discord_id);
 
@@ -235,7 +276,7 @@ async function updateStats(discord_id, platform, time_saved) {
     }
 
     account.total_usage[platform].total_uses += 1;
-    account.total_usage[platform].time_saved += time_saved;
+    account.total_usage[platform].time_saved += Number(time_saved) || 0;
 
     await updateDB(
         'accounts',
@@ -245,6 +286,7 @@ async function updateStats(discord_id, platform, time_saved) {
     );
 }
 
+// Set a database column back to its default.
 async function setDefault(table, column) {
     const { error } = await supabase.rpc('set_column_to_default', {
         table_name: table,
@@ -257,6 +299,7 @@ async function setDefault(table, column) {
 module.exports = {
     addToDb,
     setDefault,
+    updateDB,
     updateStats,
     removeMainAccount,
     getAudit,
