@@ -1,21 +1,14 @@
 const { ContainerBuilder, TextDisplayBuilder } = require('discord.js');
-
-const {
-    checkAccount,
-    addToDb,
-    updateDB
-} = require('../database/accounts');
-
+const { checkAccount, addToDb, updateDB } = require('../database/accounts');
 const whatRole = require('../utils/whatRole');
 const config = require('../config.json');
-
 const queueRanksPositions = config.queue_ranks;
+const emojis = config.emojis;
 const hash = require('../utils/hash');
 const hashCompare = require('../utils/hashCompare');
 
 async function useUpSlot(interaction, platform, accountId, alias) {
     if (!alias) alias = platform;
-
     const account = await checkAccount(interaction.user.id);
 
     if (await hashCompare(accountId, account.main_accounts[alias])) {
@@ -23,14 +16,12 @@ async function useUpSlot(interaction, platform, accountId, alias) {
 
         if (!account.used_main_account) {
             console.log('Add total use for main account');
-
             account.used_main_account = true;
             account.total_uses += 1;
-
             await updateDB(interaction.user.id, account);
         }
     } else {
-        console.log('Not a main account, checking if account already used');
+        console.log('Not a main account, checking if account alrady used');
 
         const platformUsesAccounts = account.uses[platform] ?? [];
         let accountAlreadyUsed = false;
@@ -45,13 +36,11 @@ async function useUpSlot(interaction, platform, accountId, alias) {
         console.log(accountAlreadyUsed);
 
         if (!accountAlreadyUsed) {
-            console.log('The account has not been used so we need to check if it has slots');
+            console.log('The account has not been used so we need to check if has slots');
 
             if (platformUsesAccounts.length >= account.slots) {
-                const section = new TextDisplayBuilder()
-                    .setContent(
-                        '# No Account Slots Left\nYou have run out of account slots. Please wait 24 hours for your account slots to replenish.'
-                    );
+                const section = new TextDisplayBuilder().setContent(`# No Account Slots Left
+You have run out of account slots. Please wait 24 hours for your account slots to replenish.`);
 
                 const container = new ContainerBuilder()
                     .setAccentColor(0xFF474D)
@@ -78,20 +67,13 @@ async function useUpSlot(interaction, platform, accountId, alias) {
 }
 
 async function validAccount(interaction, platform) {
-    const roleID = whatRole(
-        await interaction.guild.members.fetch(interaction.user.id)
-    );
-
-    const userRole = Object.keys(queueRanksPositions)
-        .find(key => queueRanksPositions[key] === roleID) ?? null;
-
+    const roleID = whatRole(await interaction.guild.members.fetch(interaction.user.id));
+    const userRole = Object.keys(queueRanksPositions).find(key => queueRanksPositions[key] === roleID) ?? null;
     const account = await checkAccount(interaction.user.id, userRole);
 
     if (!account) {
-        const section = new TextDisplayBuilder()
-            .setContent(
-                '# No Account Found\nYou do not have a SparxNow Account. Please create one by doing `/account` and then configuring the main account for this platform.'
-            );
+        const section = new TextDisplayBuilder().setContent(`# No Account Found
+You do not have a SparxNow Account. Please create one by doing \`/account\` and then configuring the main account for this platform.`);
 
         const container = new ContainerBuilder()
             .setAccentColor(0xFF474D)
@@ -105,10 +87,8 @@ async function validAccount(interaction, platform) {
         return true;
 
     } else if (!account.main_accounts[platform] && config.require_mainaccounts) {
-        const section = new TextDisplayBuilder()
-            .setContent(
-                '# No Main Account Found for this Platform\nYou do not have a Main Account for this platform configured. Please configure one in the `/account` menu.'
-            );
+        const section = new TextDisplayBuilder().setContent(`# No Main Account Found for this Platform
+You do not have a Main Account for this platform configured. Please configure one by doing it in the \`/account\` menu.`);
 
         const container = new ContainerBuilder()
             .setAccentColor(0xFF474D)
@@ -122,10 +102,8 @@ async function validAccount(interaction, platform) {
         return true;
 
     } else if (!userRole) {
-        const section = new TextDisplayBuilder()
-            .setContent(
-                '# You do not have Access\nYou do not have access to the bot. Please open a ticket to buy Lifetime for £6 or activate your 3-day free trial if you have not already.'
-            );
+        const section = new TextDisplayBuilder().setContent(`# You do not have Access
+You do not have access to the bot. Please open a ticket to buy Lifetime for £6 or activate your 3-day free trial if you haven't already.`);
 
         const container = new ContainerBuilder()
             .setAccentColor(0xFF474D)
@@ -138,86 +116,58 @@ async function validAccount(interaction, platform) {
 
         return true;
     }
-
-    return false;
 }
 
 async function createAccount(interaction) {
-    // Acknowledge the modal submission immediately.
     await interaction.deferReply({
         flags: 32768 | 64
     });
 
     try {
-        const masterPassword = interaction.fields.getTextInputValue(
-            'master_password'
-        );
+        const master_password = interaction.fields.getTextInputValue('master_password');
 
         const userId = interaction.user.id;
+        const roleID = whatRole(await interaction.guild.members.fetch(userId));
+        const userRole = Object.keys(queueRanksPositions).find(key => queueRanksPositions[key] === roleID);
 
-        const roleID = whatRole(
-            await interaction.guild.members.fetch(userId)
-        );
-
-        const userRole = Object.keys(queueRanksPositions)
-            .find(key => queueRanksPositions[key] === roleID) ?? null;
-
-        // Hash the password before storing it.
-        const hashedPassword = await hash(masterPassword);
-
-        const accountCreated = await addToDb(
-            userId,
-            hashedPassword,
-            userRole
-        );
+        const accountCreated = await addToDb(userId, await hash(master_password), userRole);
 
         if (!accountCreated) {
-            const section = new TextDisplayBuilder()
-                .setContent(
-                    '# Account Already Exists\nYou already have a SparxNow account.'
-                );
+            const section = new TextDisplayBuilder().setContent(`# Account already Exists
+You already have a SparxNow account.`);
 
             const container = new ContainerBuilder()
                 .setAccentColor(0xFF474D)
                 .addTextDisplayComponents(section.data);
 
             await interaction.editReply({
+                flags: 32768,
                 components: [container]
             });
 
             return;
         }
 
-        const section = new TextDisplayBuilder()
-            .setContent(
-                '# Account Created\nYour SparxNow account has been successfully created!'
-            );
+        const section = new TextDisplayBuilder().setContent(`# Account Created
+Your SparxNow account has been successfully created!`);
 
         const container = new ContainerBuilder()
             .setAccentColor(0x90EE90)
             .addTextDisplayComponents(section.data);
 
         await interaction.editReply({
+            flags: 32768,
             components: [container]
         });
 
     } catch (error) {
         console.error('Create account error:', error);
 
-        try {
-            await interaction.editReply({
-                content: 'There was a problem creating your account. Please try again.',
-                components: [],
-                embeds: []
-            });
-        } catch (replyError) {
-            console.error('Failed to send account creation error:', replyError);
-        }
+        await interaction.editReply({
+            content: 'Failed to create your account. Please try again.',
+            components: []
+        });
     }
 }
 
-module.exports = {
-    createAccount,
-    validAccount,
-    useUpSlot
-};
+module.exports = { createAccount, validAccount, useUpSlot };
