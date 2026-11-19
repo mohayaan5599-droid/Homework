@@ -12,13 +12,18 @@ const {
     EmbedBuilder
 } = require('discord.js');
 
-const { checkAccount, activateFreeTrial } = require('../../database/accounts');
+const {
+    checkAccount,
+    activateFreeTrial
+} = require('../../database/accounts');
+
 const config = require('../../config.json');
 const queueRanksPositions = config.queue_ranks;
 const emojis = config.emojis;
 const whatRole = require('../../utils/whatRole');
 const formatTime = require('../../utils/formatTime');
 
+// Create embeds
 function makeEmbed(title, description, color = 0x353839) {
     return new EmbedBuilder()
         .setColor(color)
@@ -26,8 +31,22 @@ function makeEmbed(title, description, color = 0x353839) {
         .setDescription(description);
 }
 
+// Create action rows
 function makeRow(...components) {
     return new ActionRowBuilder().addComponents(...components);
+}
+
+// Safely apply optional configured emojis
+function setButtonEmoji(button, emoji, fallback) {
+    if (emoji && typeof emoji === 'object' && (emoji.id || emoji.name)) {
+        button.setEmoji(emoji);
+    } else if (typeof emoji === 'string' && emoji.length > 0) {
+        button.setEmoji({ name: emoji });
+    } else if (fallback) {
+        button.setEmoji({ name: fallback });
+    }
+
+    return button;
 }
 
 module.exports = {
@@ -38,23 +57,28 @@ module.exports = {
     public: true,
 
     async execute(interaction) {
-        // Acknowledge immediately. Use a normal ephemeral reply,
-        // because this file now uses standard embeds and action rows.
-        await interaction.deferReply({
-            flags: 64
-        });
+        await interaction.deferReply({ flags: 64 });
 
         try {
-            const roleID = whatRole(
-                await interaction.guild.members.fetch(interaction.user.id)
+            const member = await interaction.guild.members.fetch(
+                interaction.user.id
             );
+
+            const roleID = whatRole(member);
 
             const userRole = Object.keys(queueRanksPositions)
                 .find(key => queueRanksPositions[key] === roleID) ?? null;
 
-            console.log(userRole);
+            console.log('Account role:', userRole);
 
-            const account = await checkAccount(interaction.user.id, userRole);
+            const account = await checkAccount(
+                interaction.user.id,
+                userRole
+            );
+
+            // ==========================================
+            // EXISTING ACCOUNT
+            // ==========================================
 
             if (account) {
                 let totalUses = 0;
@@ -62,45 +86,56 @@ module.exports = {
                 let timeSaved = 0;
                 let timeSavedPlatforms = '';
 
-                for (const [name, platform] of Object.entries(account.total_usage)) {
-                    totalUses += platform.total_uses;
+                for (const [name, platform] of Object.entries(account.total_usage || {})) {
+                    totalUses += platform.total_uses || 0;
 
-                    platformsUsed += `${name.charAt(0).toUpperCase() + name.slice(1)}: ${platform.total_uses}\n`;
+                    platformsUsed +=
+                        `${name.charAt(0).toUpperCase() + name.slice(1)}: ${platform.total_uses || 0}\n`;
 
-                    timeSaved += platform.time_saved;
+                    timeSaved += platform.time_saved || 0;
 
-                    timeSavedPlatforms += `${name.charAt(0).toUpperCase() + name.slice(1)}: ${formatTime(platform.time_saved)}\n`;
+                    timeSavedPlatforms +=
+                        `${name.charAt(0).toUpperCase() + name.slice(1)}: ${formatTime(platform.time_saved || 0)}\n`;
                 }
 
                 let usages = '';
 
-                for (const [platform, usage] of Object.entries(account.uses)) {
-                    usages += `${platform.charAt(0).toUpperCase() + platform.slice(1)}: ${usage.length}/${account.slots}\n`;
+                for (const [platform, usage] of Object.entries(account.uses || {})) {
+                    usages +=
+                        `${platform.charAt(0).toUpperCase() + platform.slice(1)}: ${usage.length}/${account.slots}\n`;
                 }
 
-                const statsBtn = new ButtonBuilder()
-                    .setCustomId('view_stats')
-                    .setLabel('View Stats')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji(emojis.stats);
+                const statsBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('view_stats')
+                        .setLabel('View Stats')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.stats
+                );
 
-                const savedBtn = new ButtonBuilder()
-                    .setCustomId('manage_saved_accounts')
-                    .setLabel('Saved Accounts')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji(emojis.accounts);
+                const savedBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('manage_saved_accounts')
+                        .setLabel('Saved Accounts')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.accounts
+                );
 
-                const mainBtn = new ButtonBuilder()
-                    .setCustomId('configure_main_accounts')
-                    .setLabel('Main Accounts')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji(emojis.main_accounts);
+                const mainBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('configure_main_accounts')
+                        .setLabel('Main Accounts')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.main_accounts
+                );
 
-                const settingBtn = new ButtonBuilder()
-                    .setCustomId('settings')
-                    .setLabel('Settings')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji(emojis.settings);
+                const settingBtn = setButtonEmoji(
+                    new ButtonBuilder()
+                        .setCustomId('settings')
+                        .setLabel('Settings')
+                        .setStyle(ButtonStyle.Secondary),
+                    emojis.settings
+                );
 
                 const freetrialBtn = new ButtonBuilder()
                     .setCustomId('activate_free_trial')
@@ -129,17 +164,27 @@ module.exports = {
                 });
 
                 const collector = message.createMessageComponentCollector({
-                    componentType: ComponentType.Button
+                    componentType: ComponentType.Button,
+                    time: 900000
                 });
 
-                collector.on('collect', async (buttonInteraction) => {
+                collector.on('collect', async buttonInteraction => {
                     try {
+                        if (buttonInteraction.user.id !== interaction.user.id) {
+                            await buttonInteraction.reply({
+                                content: 'This account menu is not yours.',
+                                flags: 64
+                            });
+                            return;
+                        }
+
+                        // SETTINGS
                         if (buttonInteraction.customId === 'settings') {
                             const modal = new ModalBuilder()
                                 .setCustomId('handleSettings')
                                 .setTitle('Settings for Platform...');
 
-                            const sparxInput = new StringSelectMenuBuilder()
+                            const platformInput = new StringSelectMenuBuilder()
                                 .setCustomId('platform')
                                 .setPlaceholder('Platform')
                                 .addOptions(
@@ -149,12 +194,12 @@ module.exports = {
                                     { label: 'Science', value: 'science', emoji: emojis.science }
                                 );
 
-                            const typeLabel = new LabelBuilder({
-                                label: 'Platform',
-                                component: sparxInput
-                            });
-
-                            modal.addLabelComponents(typeLabel);
+                            modal.addLabelComponents(
+                                new LabelBuilder({
+                                    label: 'Platform',
+                                    component: platformInput
+                                })
+                            );
 
                             await buttonInteraction.showModal(modal);
                             return;
@@ -162,34 +207,42 @@ module.exports = {
 
                         await buttonInteraction.deferUpdate();
 
+                        // VIEW STATS
                         if (buttonInteraction.customId === 'view_stats') {
                             await buttonInteraction.followUp({
                                 flags: 64,
                                 embeds: [
                                     makeEmbed(
                                         '📊 Statistics',
-                                        `**Total Usage:** You have used the bot a total of **${totalUses}** times.\n` +
-                                        `**Time Saved:** You have saved **${formatTime(timeSaved)}** of time.\n\n` +
+                                        `**Total Usage:** ${totalUses} times.\n` +
+                                        `**Time Saved:** ${formatTime(timeSaved)}.\n\n` +
                                         `**Platform Usage**\n\`\`\`js\n${platformsUsed || 'No platform usage'}\n\`\`\`\n` +
                                         `**Time Saved**\n\`\`\`js\n${timeSavedPlatforms || 'No time saved data'}\n\`\`\``
                                     )
                                 ]
                             });
+                        }
 
-                        } else if (buttonInteraction.customId === 'manage_saved_accounts') {
-                            const statsBtn = new ButtonBuilder()
-                                .setCustomId('view_accounts')
-                                .setLabel('View Accounts')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setEmoji(emojis.accounts);
+                        // SAVED ACCOUNTS
+                        else if (buttonInteraction.customId === 'manage_saved_accounts') {
+                            const viewBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('view_accounts')
+                                    .setLabel('View Accounts')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.accounts
+                            );
 
-                            const savedBtn = new ButtonBuilder()
-                                .setCustomId('change_master_password')
-                                .setLabel('Change Master Password')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setEmoji(emojis.key);
+                            const changeBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('change_master_password')
+                                    .setLabel('Change Master Password')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.key,
+                                '🔑'
+                            );
 
-                            const messageSent = await buttonInteraction.followUp({
+                            const savedMessage = await buttonInteraction.followUp({
                                 flags: 64,
                                 embeds: [
                                     makeEmbed(
@@ -198,17 +251,26 @@ module.exports = {
                                         '**Warning:** Changing your Master Password will delete all saved accounts!'
                                     )
                                 ],
-                                components: [makeRow(statsBtn, savedBtn)],
+                                components: [makeRow(viewBtn, changeBtn)],
                                 fetchReply: true
                             });
 
-                            const savedCollector = messageSent.createMessageComponentCollector({
-                                componentType: ComponentType.Button
+                            const savedCollector = savedMessage.createMessageComponentCollector({
+                                componentType: ComponentType.Button,
+                                time: 900000
                             });
 
-                            savedCollector.on('collect', async (accountInteraction) => {
+                            savedCollector.on('collect', async accountInteraction => {
                                 try {
-                                    const schoolInput = new TextInputBuilder()
+                                    if (accountInteraction.user.id !== interaction.user.id) {
+                                        await accountInteraction.reply({
+                                            content: 'This menu is not yours.',
+                                            flags: 64
+                                        });
+                                        return;
+                                    }
+
+                                    const passwordInput = new TextInputBuilder()
                                         .setCustomId('master_password')
                                         .setLabel('Master Password')
                                         .setStyle(TextInputStyle.Short);
@@ -221,7 +283,7 @@ module.exports = {
                                                 : 'Change Master Password'
                                         )
                                         .addComponents(
-                                            new ActionRowBuilder().addComponents(schoolInput)
+                                            new ActionRowBuilder().addComponents(passwordInput)
                                         );
 
                                     await accountInteraction.showModal(modal);
@@ -229,27 +291,34 @@ module.exports = {
                                     console.error('Saved accounts button error:', error);
                                 }
                             });
+                        }
 
-                        } else if (buttonInteraction.customId === 'configure_main_accounts') {
+                        // MAIN ACCOUNTS
+                        else if (buttonInteraction.customId === 'configure_main_accounts') {
                             let configured = '';
 
-                            for (const mainAccount of Object.keys(account.main_accounts)) {
-                                configured += `${mainAccount.charAt(0).toUpperCase() + mainAccount.slice(1)}: Configured\n`;
+                            for (const mainAccount of Object.keys(account.main_accounts || {})) {
+                                configured +=
+                                    `${mainAccount.charAt(0).toUpperCase() + mainAccount.slice(1)}: Configured\n`;
                             }
 
-                            const statsBtn = new ButtonBuilder()
-                                .setCustomId('add_main_account')
-                                .setLabel('Add Main Account')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setEmoji(emojis.main_accounts);
+                            const addBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('add_main_account')
+                                    .setLabel('Add Main Account')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.main_accounts
+                            );
 
-                            const cookieBtn = new ButtonBuilder()
-                                .setCustomId('add_main_cookie_account')
-                                .setLabel('Add Main Account with Cookies (Sparx Only)')
-                                .setStyle(ButtonStyle.Secondary)
-                                .setEmoji(emojis.cookies);
+                            const cookieBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('add_main_cookie_account')
+                                    .setLabel('Add Main Account with Cookies (Sparx Only)')
+                                    .setStyle(ButtonStyle.Secondary),
+                                emojis.cookies
+                            );
 
-                            const messageSent = await buttonInteraction.followUp({
+                            const mainMessage = await buttonInteraction.followUp({
                                 flags: 64,
                                 embeds: [
                                     makeEmbed(
@@ -260,16 +329,25 @@ module.exports = {
                                         '**Warning:** Configuring a Main Account is irreversible!'
                                     )
                                 ],
-                                components: [makeRow(statsBtn, cookieBtn)],
+                                components: [makeRow(addBtn, cookieBtn)],
                                 fetchReply: true
                             });
 
-                            const mainCollector = messageSent.createMessageComponentCollector({
-                                componentType: ComponentType.Button
+                            const mainCollector = mainMessage.createMessageComponentCollector({
+                                componentType: ComponentType.Button,
+                                time: 900000
                             });
 
-                            mainCollector.on('collect', async (accountInteraction) => {
+                            mainCollector.on('collect', async accountInteraction => {
                                 try {
+                                    if (accountInteraction.user.id !== interaction.user.id) {
+                                        await accountInteraction.reply({
+                                            content: 'This menu is not yours.',
+                                            flags: 64
+                                        });
+                                        return;
+                                    }
+
                                     const modal = new ModalBuilder()
                                         .setCustomId('main_account_configure')
                                         .setTitle('Main Account Configuration');
@@ -301,7 +379,7 @@ module.exports = {
                                                 { label: 'Google', value: 'Google', emoji: emojis.google }
                                             );
 
-                                        const sparxInput = new StringSelectMenuBuilder()
+                                        const platformInput = new StringSelectMenuBuilder()
                                             .setCustomId('platform')
                                             .setPlaceholder('Platform')
                                             .addOptions(
@@ -317,7 +395,7 @@ module.exports = {
                                         modal.addLabelComponents(
                                             new LabelBuilder({
                                                 label: 'Platform',
-                                                component: sparxInput
+                                                component: platformInput
                                             })
                                         );
 
@@ -343,6 +421,8 @@ module.exports = {
                                         modal.addComponents(
                                             new ActionRowBuilder().addComponents(cookieInput)
                                         );
+                                    } else {
+                                        return;
                                     }
 
                                     await accountInteraction.showModal(modal);
@@ -350,9 +430,11 @@ module.exports = {
                                     console.error('Main account button error:', error);
                                 }
                             });
+                        }
 
-                        } else if (buttonInteraction.customId === 'activate_free_trial') {
-                            if (!Object.keys(account.main_accounts).length) {
+                        // FREE TRIAL
+                        else if (buttonInteraction.customId === 'activate_free_trial') {
+                            if (!Object.keys(account.main_accounts || {}).length) {
                                 await buttonInteraction.followUp({
                                     flags: 64,
                                     embeds: [
@@ -367,15 +449,17 @@ module.exports = {
                                 return;
                             }
 
-                            const freeTrialActivatedSuccess = await activateFreeTrial(
+                            const freeTrialActivated = await activateFreeTrial(
                                 buttonInteraction.user.id
                             );
 
-                            if (freeTrialActivatedSuccess) {
-                                const freetrialRoleId = queueRanksPositions['free-trial'];
+                            if (freeTrialActivated) {
+                                const freeTrialRoleId = queueRanksPositions['free-trial'];
 
                                 try {
-                                    await buttonInteraction.member.roles.add(freetrialRoleId);
+                                    if (freeTrialRoleId) {
+                                        await buttonInteraction.member.roles.add(freeTrialRoleId);
+                                    }
                                 } catch (error) {
                                     console.error('Free trial role error:', error);
                                 }
@@ -410,7 +494,13 @@ module.exports = {
                     }
                 });
 
-            } else {
+            }
+
+            // ==========================================
+            // CREATE ACCOUNT
+            // ==========================================
+
+            else {
                 const agreeBtn = new ButtonBuilder()
                     .setCustomId('agree')
                     .setLabel('I Agree')
@@ -428,21 +518,33 @@ module.exports = {
                 });
 
                 const collector = message.createMessageComponentCollector({
-                    componentType: ComponentType.Button
+                    componentType: ComponentType.Button,
+                    time: 900000
                 });
 
-                collector.on('collect', async (buttonInteraction) => {
+                collector.on('collect', async buttonInteraction => {
                     try {
+                        if (buttonInteraction.user.id !== interaction.user.id) {
+                            await buttonInteraction.reply({
+                                content: 'This account menu is not yours.',
+                                flags: 64
+                            });
+                            return;
+                        }
+
+                        // I AGREE BUTTON
                         if (buttonInteraction.customId === 'agree') {
-                            await buttonInteraction.deferUpdate();
+                            const createBtn = setButtonEmoji(
+                                new ButtonBuilder()
+                                    .setCustomId('create_master_password')
+                                    .setLabel('Create Master Password')
+                                    .setStyle(ButtonStyle.Primary),
+                                emojis.key,
+                                '🔑'
+                            );
 
-                            const createBtn = new ButtonBuilder()
-                                .setCustomId('create_master_password')
-                                .setLabel('Create Master Password')
-                                .setEmoji(emojis.key)
-                                .setStyle(ButtonStyle.Primary);
-
-                            await buttonInteraction.editReply({
+                            // Update the original message immediately.
+                            await buttonInteraction.update({
                                 embeds: [
                                     makeEmbed(
                                         'Create Master Password',
@@ -454,17 +556,21 @@ module.exports = {
                                 components: [makeRow(createBtn)]
                             });
 
-                        } else if (buttonInteraction.customId === 'create_master_password') {
-                            const masterPasswordInput = new TextInputBuilder()
+                            return;
+                        }
+
+                        // CREATE MASTER PASSWORD BUTTON
+                        if (buttonInteraction.customId === 'create_master_password') {
+                            const passwordInput = new TextInputBuilder()
                                 .setCustomId('master_password')
                                 .setLabel('Master Password')
                                 .setStyle(TextInputStyle.Short);
 
                             const modal = new ModalBuilder()
                                 .setCustomId('create_master_password')
-                                .setTitle('Saved Accounts Login')
+                                .setTitle('Create Master Password')
                                 .addComponents(
-                                    new ActionRowBuilder().addComponents(masterPasswordInput)
+                                    new ActionRowBuilder().addComponents(passwordInput)
                                 );
 
                             await buttonInteraction.showModal(modal);
@@ -472,6 +578,17 @@ module.exports = {
 
                     } catch (error) {
                         console.error('Account creation button error:', error);
+
+                        if (!buttonInteraction.replied && !buttonInteraction.deferred) {
+                            try {
+                                await buttonInteraction.reply({
+                                    content: 'Something went wrong. Please try `/account` again.',
+                                    flags: 64
+                                });
+                            } catch (replyError) {
+                                console.error('Could not reply to account button:', replyError);
+                            }
+                        }
                     }
                 });
             }
@@ -479,16 +596,14 @@ module.exports = {
         } catch (error) {
             console.error('Error executing account:', error);
 
-            const errorMessage = 'An error occurred while loading your account. Please try again.';
-
             try {
                 await interaction.editReply({
-                    content: errorMessage,
+                    content: 'An error occurred while loading your account. Please try again.',
                     embeds: [],
                     components: []
                 });
             } catch (replyError) {
-                console.error('Could not send account error message:', replyError);
+                console.error('Could not send account error:', replyError);
             }
         }
     }
