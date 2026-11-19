@@ -1,138 +1,121 @@
 require('dotenv').config();
+
+const token = process.env.DISCORD_TOKEN;
+const ADMIN_ROLE = process.env.ADMIN_ROLE;
+
 const fs = require('node:fs');
+const fspromise = require('fs').promises;
+const path = require('node:path');
+
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    Collection,
+    ActionRowBuilder,
+    ButtonBuilder,
+    REST,
+    Routes
+} = require('discord.js');
+
+const { logError } = require('./utils/errorLogger.js');
+const { executeViewAccounts, saveAccount } = require('./handlers/savedAccountsHandler.js');
+const { educake_collector, educake_model_executor } = require('./educake/main.js');
+const { seneca_collector, seneca_model_executor } = require('./seneca/main.js');
+const { drfrost_collector, drfrost_model_executor } = require('./drfrost/main.js');
+const { createAccount } = require('./handlers/accountHandler.js');
+const { mainAccountLogin } = require('./handlers/mainAccountLogin.js');
+
+const {
+    viewSavedAccounts,
+    changeMasterPassword,
+    updateAccountInteraction,
+    changeSlots,
+    disableMasterPassword,
+    enableMasterPassword,
+    verifyPasswordForChange,
+    enableMasterPasswordDirect
+} = require('./handlers/accountManager.js');
+
+const { updateAnalyticsEmbed } = require('./utils/analytics.js');
+const { handleSettings } = require('./settings/router.js');
+const { handleApiKeyRequest } = require('./handlers/apikeyHandler.js');
+const config = require('./config.json');
+const imageSolverHandler = require('./imageSolver.js');
 const util = require('util');
 
-if (!fs.existsSync('crash.log')) {
-    fs.writeFileSync('crash.log', ''); 
+if (!token) {
+    console.error('Missing DISCORD_TOKEN environment variable.');
+    process.exit(1);
 }
-if (!fs.existsSync('logs.txt')) {
-    fs.writeFileSync('logs.txt', ''); 
-}
-const logFile = fs.createWriteStream('logs.txt', { flags: 'w' });
 
+// Ensure the file exists
+if (!fs.existsSync('logs.txt')) {
+    fs.writeFileSync('logs.txt', '');
+}
+
+const logFile = fs.createWriteStream('logs.txt', { flags: 'w' });
 const originalLog = console.log;
+
 console.log = function (...args) {
     logFile.write(util.format(...args) + '\n');
     originalLog.apply(console, args);
 };
 
-const originalError = console.error; 
-console.error = function (...args) { 
-    const msg = '[ERROR] ' + util.format(...args) + '\n'; 
-    
-    // Streams (like logFile) are already non-blocking/async-driven
-    if (logFile.writable) {
-        logFile.write(msg);
+async function cleanLogs(dir = 'logs') {
+    await fspromise.mkdir(dir, { recursive: true });
+    const entries = await fspromise.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+            await cleanLogs(fullPath);
+        } else if (entry.isFile() && entry.name !== '.gitkeep') {
+            await fspromise.unlink(fullPath);
+        }
     }
-    
-    // Asynchronous fire-and-forget append. 
-    // We attach a .catch() to silently fail instead of using a try/catch block.
-    fs.promises.appendFile('crash.log', msg).catch(() => {
-        // Silently fail if we can't write to the file, to avoid a fatal crash loop
-    });
+}
 
-    originalError.apply(console, args); 
-};
+cleanLogs().catch(err => console.error('cleanLogs failed:', err));
 
-process.on('unhandledRejection', async (reason) => {
-    const errorMsg = `[Unhandled Rejection] ${reason ? reason.stack || reason : 'Unknown reason'}\n`;
-    console.error(errorMsg);
+const { executeTasks } = require('./executeTasks.js');
+const {
+    languagenut_model_executor,
+    languagenut_collector
+} = require('./languagenut/main.js');
+
+const { cookieUpdate } = require('./cookies_menu.js');
+
+process.on('uncaughtException', async (err) => {
+    console.error('Uncaught Exception:', err);
 
     try {
-        const { logError } = require('./utils/errorLogger.js');
-        
-        // Ensure logError finishes, and if it fails, write to the log asynchronously
-        await logError(reason, null, 'Global Unhandled Rejection').catch(async (e) => {
-            await fs.promises.appendFile('crash.log', `[Meta-Error] Webhook failed: ${e.message}\n`).catch(() => {});
-        });
+        await logError(err, null, 'Global Uncaught Exception');
     } catch (e) {
-        // Await the file write here since this block is already inside an async function
-        await fs.promises.appendFile('crash.log', `[Meta-Error] logError function failed: ${e}\n`).catch(() => {});
+        console.error('Failed to log error to DB:', e);
     }
 });
 
-process.on('exit', (code) => {
-    const msg = `PROCESS EXITED WITH CODE: ${code}\n`;
-    console.log(msg);
-    fs.appendFileSync('crash.log', msg);
+process.on('unhandledRejection', async (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+
+    try {
+        await logError(reason, null, 'Global Unhandled Rejection');
+    } catch (e) {
+        console.error('Failed to log error to DB:', e);
+    }
 });
 
-const { settingsDisplayer } = require('./generic/settingsDisplayer.js');
-const { handleQueueInput } = require('./handlers/queueChangeHandler.js');
-const token = process.env.DISCORD_TOKEN;
-const fspromise = require('fs').promises;
-const path = require('node:path');
-const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
-const { executeViewAccounts, saveAccount } = require('./handlers/savedAccountsHandler.js');
-const { createAccount } = require('./handlers/accountHandler.js');
-const mainAccountLogin = require('./handlers/mainAccountLogin.js');
-const { viewSavedAccounts, changeMasterPassword, updateAccountInteraction, changeSlots } = require('./handlers/accountManager.js');
-const config = require('./config.json');
-const imageSolverHandler = require('./imageSolver.js');
-const processSettings = require('./generic/processSettings.js');
-const seperateParentChild = require('./utils/seperateParentChild.js');
-const processLogin = require('./generic/processLogin.js');
-const axios = require('axios');
-const FormData = require('form-data');
-const { colours, admin_roles, down_channel, base_role, channels, image_solver } = require('./config.json');
-const sendStartedMessage = require('./utils/sendStartedMessage.js');
+const { sparxReaderCollector } = require('./collectors/sparxCollectors.js');
 
-async function showAutocompChannels(client) {
-    const downChannel = await client.channels.fetch(down_channel);
-
-    await downChannel.permissionOverwrites.edit(base_role, {
-        ViewChannel: false, 
-    });
-
-    const imageSolver = await client.channels.fetch(image_solver);
-
-    await imageSolver.permissionOverwrites.edit(base_role, {
-        ViewChannel: true, 
-    });
-    for (const channel of Object.values(channels)) {
-        const tchannel = await client.channels.fetch(channel);
-
-        await tchannel.permissionOverwrites.edit(base_role, {
-            ViewChannel: true, 
-        });
-    }
-}
-
-const sendLog = require('./utils/sendLogsWebhook.js');
-async function cleanAllLogs(dir = './sessionLogs') {
-    const files = fs.readdirSync(dir);
-
-    for (const name of files) {
-        if (name === ".gitkeep") continue;
-        const filePath = path.join(dir, name);
-        const stats = fs.statSync(filePath);
-
-        const embed = {
-            title: 'Session Logs (Cleanup)',
-            description: `Logs uploaded at **${new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '')}**`,
-            color: colours.onyx,
-            fields: [
-                { name: 'File Path', value: filePath },
-            ]
-        };
-
-        await sendLog(filePath, name, embed);
-    }
-}
-
-// Call the function starting at the root 'autocompleters' folder
-cleanAllLogs('./sessionLogs')
-    .then(() => console.log('Log cleanup complete!'))
-    .catch(console.error);
-
-// legalDisclamer: `\n> **LEGAL DISCLAMER**: ${name} employs the use of human tutors to complete the tasks given to them by customers of ${name}. No LLM (AI) is used throughout this process. No content or material from the homework platform is used for anything other than its permitted purpose. ${name} is in compliance with all regulations and abides by all Terms of Service of this homework platform.`,
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.MessageContent,
-    ],
+        GatewayIntentBits.MessageContent
+    ]
 });
 
 client.on('error', (error) => {
@@ -145,8 +128,12 @@ client.on('warn', (info) => {
 
 client.on('clientReady', () => {
     console.log(`Logged in as ${client.user.tag}!`);
-    showAutocompChannels(client);
-    sendStartedMessage(client);
+
+    updateAnalyticsEmbed(client);
+
+    setInterval(() => {
+        updateAnalyticsEmbed(client);
+    }, 300000);
 });
 
 client.commands = new Collection();
@@ -156,106 +143,120 @@ const commandFolders = fs.readdirSync(foldersPath);
 
 for (const folder of commandFolders) {
     if (folder === '.DS_Store') continue;
+
     const commandsPath = path.join(foldersPath, folder);
     const stats = fs.statSync(commandsPath);
+
     if (!stats.isDirectory()) continue;
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+    const commandFiles = fs.readdirSync(commandsPath)
+        .filter(file => file.endsWith('.js'));
+
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
         const command = require(filePath);
-        // Set a new item in the Collection with the key as the command name and the value as the exported module
+
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
         } else {
-            console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+            console.log(
+                `[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`
+            );
         }
     }
 }
 
+// Register slash commands
+async function registerSlashCommands() {
+    try {
+        const rest = new REST().setToken(token);
+        const commands = client.commands.map(c => c.data.toJSON());
+
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+
+        console.log(`Registered ${commands.length} commands`);
+    } catch (err) {
+        console.error('Command registration failed:', err);
+    }
+}
+
 async function sendPersistentEmbeds(client) {
-    const dirPath = path.join(__dirname, 'autocompleters');
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    await updateAnalyticsEmbed(client);
 
-    // Filter out only the directories
-    const folders = entries.filter(entry => entry.isDirectory());
+    const embedsPath = path.join(__dirname, 'startEmbeds', 'embeds');
+    const embedFiles = fs.readdirSync(embedsPath)
+        .filter(file => file.endsWith('.js'));
 
-    let startEmbedCollector = require('./generic/startEmbedCollector.js');
-    
-    // Loop through them
-    for (const folder of folders) {
-        const folderPath = path.join(dirPath, folder.name);
+    const embeds = new Map();
 
-        // Determine paths and config keys for startEmbed.js
-        const childrenPath = path.join(folderPath, 'children');
-        let embedTargets =[]; // Array of objects holding the path and the config dictionary key
+    for (const file of embedFiles) {
+        const filePath = path.join(embedsPath, file);
+        const embed = require(filePath);
 
-        if (fs.existsSync(childrenPath) && fs.statSync(childrenPath).isDirectory()) {
-            // If 'children' exists, read its subdirectories (maths, reader, science)
-            const childEntries = fs.readdirSync(childrenPath, { withFileTypes: true });
-            const childFolders = childEntries.filter(entry => entry.isDirectory());
-            
-            for (const childFolder of childFolders) {
-                embedTargets.push({
-                    path: path.join(childrenPath, childFolder.name, 'startEmbed.js'),
-                    configKey: `${folder.name}_${childFolder.name}` // Creates "sparx_maths", "sparx_reader", etc.
-                });
-            }
-        } else {
-            // Standard behavior: root folder startEmbed.js
-            embedTargets.push({
-                path: path.join(folderPath, 'startEmbed.js'),
-                configKey: folder.name // Uses just "languagenut", "seneca", etc.
-            });
-        }
+        const name = file.replace('.js', '');
+        embeds.set(name, embed);
+    }
 
-        console.log(`Successfully loaded files from folder: ${folder.name}`);
+    console.log(`Loaded ${embeds.size} embed(s).`);
 
-        // Loop through however many targets were found for this folder
-        for (const target of embedTargets) {
-            if (!fs.existsSync(target.path)) {
-                console.log(`Cannot find startEmbed.js at ${target.path}`);
-                continue; 
-            }
+    for (const [name, container] of embeds) {
+        try {
+            const channelID = config.channels[name];
 
-            // Fetch the channel using the specific target config key
-            const channelID = config.channels[target.configKey];
             if (!channelID) {
-                console.log(`Channel for ${target.configKey} is not configured`);
-                continue; 
-            }
-
-            const channel = await client.channels.fetch(channelID);
-            if (!channel) {
-                console.log(`${target.configKey} channel not found`);
+                console.log(`Channel for ${name} is not configured`);
                 continue;
             }
 
-            const startEmbed = require(target.path);
+            const channel = await client.channels.fetch(channelID);
 
-            // Fetch recent messages to check for existing embeds
+            if (!channel) {
+                console.log(`${name} channel not found`);
+                continue;
+            }
+
             const messages = await channel.messages.fetch({ limit: 50 });
 
             const existingMessage = messages.find(msg =>
                 msg.author.id === client.user.id &&
-                msg.components?.[0]?.components?.[0]?.components?.[0]?.data?.content === startEmbed.components[0].components[0].data.content
+                msg.components?.[0]?.components?.[0]?.components?.[0]?.data?.content ===
+                container.components[0].components[0].data.content
             );
-            
+
             let embedMessage = existingMessage;
 
             if (!existingMessage) {
-                console.log(`Sending persistent embed for ${target.configKey}`);
-                
+                console.log(`Sending persistent embed for ${name}`);
+
                 embedMessage = await channel.send({
-                    flags: MessageFlags.IsComponentsV2,
-                    components: [startEmbed]
+                    flags: 32768,
+                    components: [container]
                 });
             }
 
-            if (startEmbedCollector) {
-                await startEmbedCollector(embedMessage, folder.name);
+            const collectorsMap = new Map([
+                ['languagenut_persistent', languagenut_collector],
+                ['sparx_maths_persistent', sparxReaderCollector],
+                ['sparx_reader_persistent', sparxReaderCollector],
+                ['sparx_science_persistent', sparxReaderCollector],
+                ['educake_persistent', educake_collector],
+                ['seneca_persistent', seneca_collector],
+                ['drfrost_persistent', drfrost_collector]
+            ]);
+
+            const collector = collectorsMap.get(name + '_persistent');
+
+            if (collector) {
+                await collector(embedMessage);
             } else {
-                console.log(`Cannot find collector for ${folder.name}`);
+                console.log(`No collector configured for ${name}`);
             }
+
+        } catch (error) {
+            console.error(`Error loading persistent embed ${name}:`, error);
         }
     }
 }
@@ -263,120 +264,135 @@ async function sendPersistentEmbeds(client) {
 async function DeleteVideos() {
     try {
         const files = await fspromise.readdir('videos');
+
         if (files.length > 1) {
-            console.log("Deleting files...");
+            console.log('Deleting files...');
+
             for (const file of files) {
-                if (file == '.gitkeep') continue;
+                if (file === '.gitkeep') continue;
+
                 const filePath = path.join('videos', file);
                 await fspromise.unlink(filePath);
+
                 console.log(`Deleted ${file}`);
             }
-            console.log("All files deleted.");
+
+            console.log('All files deleted.');
         } else {
-            console.log("No files to delete.");
+            console.log('No files to delete.');
         }
     } catch (err) {
-        console.error("Error deleting files:", err);
+        console.error('Error deleting files:', err);
     }
 }
 
-client.once("clientReady", async () => {
-    console.log("Bot has connected to discord");
+client.once('clientReady', async () => {
+    console.log('Bot has connected to discord');
+
+    await registerSlashCommands();
     await sendPersistentEmbeds(client);
     await DeleteVideos();
 });
 
-client.on('disconnect', () => console.log('Bot disconnected!'));
-
+// Slash command interactions
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    const command = interaction.client.commands.get(interaction.commandName);
-    // Prevent crash in DMs
+    const command = client.commands.get(interaction.commandName);
+
+    if (!command) {
+        return interaction.reply({
+            content: `No command matching ${interaction.commandName} was found.`,
+            flags: 64
+        }).catch(console.error);
+    }
+
     if (!interaction.guild) {
         return interaction.reply({
             content: 'This command can only be used in a server.',
-            flags: MessageFlags.Ephemeral
-        });
+            flags: 64
+        }).catch(console.error);
     }
 
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-    if (
-        !admin_roles.some(roleId => member.roles.cache.has(roleId)) &&
-        !command.public
-    ) {
+    // Discord provides the member's roles in the interaction.
+    // This avoids an extra API request before executing the command.
+    const memberRoles = interaction.member?.roles;
+
+    const hasAdminRole =
+        memberRoles?.cache?.has(ADMIN_ROLE) ??
+        (Array.isArray(memberRoles) && memberRoles.includes(ADMIN_ROLE));
+
+    if (!hasAdminRole && !command.public) {
         return interaction.reply({
-            content: 'Only admins can run that command, sowwy.',
-            flags: MessageFlags.Ephemeral
-        });
+            content: 'Only admins can run commands.',
+            flags: 64
+        }).catch(console.error);
     }
 
-    if (!command) {
-        await interaction.reply(`No command matching ${interaction.commandName} was found.`);
-        console.error(`No command matching ${interaction.commandName} was found.`);
-        return;
-    }
+    try {
+        await command.execute(interaction, client);
+    } catch (error) {
+        console.error(
+            `Error executing /${interaction.commandName}:`,
+            error
+        );
 
-    await command.execute(interaction, client);
+        try {
+            await logError(
+                error,
+                interaction.user,
+                `Slash Command: ${interaction.commandName}`
+            );
+        } catch (logErr) {
+            console.error('Failed to log command error:', logErr);
+        }
+
+        const errorMessage = `An error occurred: ${error.message || 'Unknown error'}`;
+
+        if (interaction.deferred) {
+            await interaction.editReply({
+                content: errorMessage,
+                components: []
+            }).catch(console.error);
+        } else if (interaction.replied) {
+            await interaction.followUp({
+                content: errorMessage,
+                flags: 64
+            }).catch(console.error);
+        } else {
+            await interaction.reply({
+                content: errorMessage,
+                flags: 64
+            }).catch(console.error);
+        }
+    }
 });
 
+// Modal submit interactions
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isModalSubmit()) return;
 
     try {
-
-        if (interaction.customId.startsWith('changeSettings')) {
-            await processSettings(interaction);
-            return;
-        }
-
-        if (interaction.customId.startsWith('queues_')) {
-            await handleQueueInput(interaction);
-            return;
-        }
-
-        if (interaction.customId.startsWith('autocompleterModule_')) {
-            const interactionSplit = interaction.customId.split('_');
-            const action = interactionSplit[2];
-            if (action.startsWith('login')) {
-                const parent = seperateParentChild(interactionSplit[1]);
-                const login = require(`./autocompleters/${parent.parent}/login.js`);
-                const getTokenRequest = require(`./autocompleters/${parent.parent}/getTokenRequest.js`);
-                const menu = require(`./autocompleters/${parent.parent}/menu.js`);
-                let userSessions;
-                if (!parent.child) {
-                    userSessions = require(`./autocompleters/${parent.parent}/userSessions.js`);
-                } else {
-                    userSessions = require(`./autocompleters/${parent.parent}/children/${parent.child}/userSessions.js`);
-                }
-                await processLogin(interaction, parent.parent, login, getTokenRequest, userSessions, menu);
-                return;
-            }
-    
-            const part = interaction.customId
-                .replace('autocompleterModule_', '') // sparx(science)_login
-                .split('_')[0]                      // sparx(science)
-                .split('(')[0];                    // sparx
-
-            const modalExecutor = require(`./autocompleters/${part}/modalExecutor.js`);
-            await modalExecutor(interaction);
-            return;
-        }
-
         if (interaction.customId.startsWith('set_slots')) {
-            await interaction.deferUpdate({ flags: MessageFlags.Ephemeral });
+            await interaction.deferUpdate();
             await changeSlots(interaction);
             return;
         }
 
+        if (interaction.customId === 'change_apikey') {
+            await interaction.deferUpdate();
+            await handleApiKeyRequest(interaction);
+            return;
+        }
+
         if (interaction.customId === 'handleSettings') {
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            await settingsDisplayer(interaction);
+            await interaction.deferReply({ flags: 64 });
+            await handleSettings(interaction);
             return;
         }
 
         if (interaction.customId === 'accountManager_service') {
-            await interaction.deferUpdate({ flags: MessageFlags.Ephemeral });
+            await interaction.deferUpdate();
             await updateAccountInteraction(interaction);
             return;
         }
@@ -405,39 +421,294 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
+        if (interaction.customId === 'confirm_disable_mp') {
+            await disableMasterPassword(interaction);
+            return;
+        }
+
+        if (interaction.customId === 'confirm_enable_mp') {
+            await enableMasterPassword(interaction);
+            return;
+        }
+
+        if (interaction.customId === 'verify_password_for_change') {
+            await verifyPasswordForChange(interaction);
+            return;
+        }
+
+        if (interaction.customId === 'enable_master_password_direct') {
+            await enableMasterPasswordDirect(interaction);
+            return;
+        }
+
+        if (interaction.customId.startsWith('seneca')) {
+            try {
+                await seneca_model_executor(interaction);
+            } catch (err) {
+                if (err.code !== 10062) {
+                    console.error('Error in seneca_model_executor:', err);
+                }
+            }
+            return;
+        }
+
+        if (interaction.customId.startsWith('drfrost')) {
+            try {
+                await drfrost_model_executor(interaction);
+            } catch (err) {
+                if (err.code !== 10062) {
+                    console.error('Error in drfrost_model_executor:', err);
+                }
+            }
+            return;
+        }
+
+        if (interaction.customId.startsWith('educake')) {
+            try {
+                await educake_model_executor(interaction);
+            } catch (err) {
+                if (err.code !== 10062) {
+                    console.error('Error in educake_model_executor:', err);
+                }
+            }
+            return;
+        }
+
+        if (interaction.customId.startsWith('languagenut_set')) {
+            await languagenut_model_executor(interaction);
+            return;
+        }
+
         if (interaction.customId.startsWith('save_account')) {
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await interaction.deferReply({ flags: 64 });
             await saveAccount(interaction);
             return;
         }
 
         if (interaction.customId.startsWith('view_saved_accounts')) {
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            await executeViewAccounts(interaction);
+            try {
+                await interaction.deferReply({ flags: 64 });
+                await executeViewAccounts(interaction);
+                return;
+            } catch {
+                return;
+            }
+        }
+
+        if (interaction.customId === 'cookies_maintenance') {
+            await cookieUpdate(interaction);
+            return;
+        }
+
+        if (!interaction.guild) {
+            if (!interaction.replied && !interaction.deferred) {
+                return interaction.reply({
+                    content: 'This bot can only be used in a server.',
+                    flags: 64
+                });
+            }
+            return;
+        }
+
+        if (interaction.customId === 'languagenut_login_modal') {
+            try {
+                await languagenut_model_executor(interaction);
+            } catch (error) {
+                console.error('Error in languagenut_model_executor:', error);
+
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: 'An error occurred while processing your LanguageNut login. Please try again.',
+                        flags: 64
+                    }).catch(replyError => {
+                        console.error('Failed to send error reply for LanguageNut:', replyError);
+                    });
+                }
+            }
+            return;
+        }
+
+        if (interaction.customId.startsWith('loginSparx')) {
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    await interaction.deferReply({ flags: 64 });
+                } catch (err) {
+                    if (err.code === 10062) return;
+                    throw err;
+                }
+            }
+
+            await executeTasks(interaction);
+            return;
+        }
+
+        if (
+            interaction.customId.startsWith('sparxreader') ||
+            interaction.customId.startsWith('sparxmaths') ||
+            interaction.customId.startsWith('sparxscience')
+        ) {
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    await interaction.deferUpdate();
+                } catch (err) {
+                    if (err.code === 10062) return;
+                    throw err;
+                }
+            }
+
+            await executeTasks(interaction);
             return;
         }
 
     } catch (error) {
-        const stack = error.stack ?? "No stack trace available";
+        if (error.code === 40060 || error.code === 10062) {
+            console.log(
+                `Interaction timeout or already acknowledged, ignoring: ${error.code}`
+            );
+            return;
+        }
 
-        // Keep message under Discord's 2000 char limit
-        const trimmedStack = stack.length > 1500
-            ? stack.slice(0, 1500) + "\n... (truncated)"
-            : stack;
+        console.error('Error handling modal submit interaction:', error);
 
-        const errorMessage = {
-            content: `⚠️ An error occurred:\n\`\`\`\n${error.message}\n\n${trimmedStack}\n\`\`\``,
-            flags: MessageFlags.Ephemeral
-        };
+        await logError(
+            error,
+            interaction.user,
+            'Modal Submit Handler'
+        ).catch(e => console.error('Failed to log modal error:', e));
 
         try {
-            await interaction.followUp(errorMessage);
-        } catch {
+            const errorMessage = {
+                content: 'An error occurred while processing your request. Please try again.',
+                flags: 64
+            };
 
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(errorMessage).catch(() => {});
+            } else {
+                await interaction.reply(errorMessage).catch(() => {});
+            }
+        } catch (e) {
+            // Ignore further errors in the error reporter
         }
     }
 });
 
+// Button interactions
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isButton()) return;
+
+    if (['resolved', 'close_ticket'].includes(interaction.customId)) {
+        try {
+            await interaction.deferReply({ ephemeral: true });
+        } catch {
+            return;
+        }
+
+        const embed = interaction.message.embeds[0];
+
+        if (!embed || !embed.footer || !embed.footer.text) {
+            await interaction.editReply(
+                'Could not find ticket information in the embed footer.'
+            );
+            return;
+        }
+
+        const footerText = embed.footer.text;
+        const userIdMatch = footerText.match(/UserID:(\d+)/);
+
+        if (!userIdMatch) {
+            await interaction.editReply(
+                'Could not parse user ID from the embed footer.'
+            );
+            return;
+        }
+
+        const userId = userIdMatch[1];
+        const ticketChannel = interaction.channel;
+
+        if (interaction.customId === 'close_ticket') {
+            await interaction.editReply('Deleting ticket...');
+
+            setTimeout(() => {
+                ticketChannel.delete().catch(err =>
+                    console.error('Failed to delete ticket channel:', err)
+                );
+            }, 1000);
+
+        } else if (interaction.customId === 'resolved') {
+            const resolvedEmbed = new EmbedBuilder()
+                .setColor(0x2ECC71)
+                .setTitle('Bug Resolved!')
+                .setDescription(
+                    "Thank you for your bug report! Our team has investigated and we're happy to let you know that the issue has been fixed.\nYou can now try again. If you run into any other problems, please let us know again."
+                )
+                .setFooter({
+                    text: 'Thanks for making SparxNow better!'
+                });
+
+            try {
+                const user = await client.users.fetch(userId);
+
+                await user.send({
+                    embeds: [resolvedEmbed]
+                });
+
+                await interaction.editReply({
+                    content: 'Resolution notice sent to the user.'
+                });
+
+            } catch (e) {
+                console.error(
+                    'Failed to send resolution message or disable buttons:',
+                    e
+                );
+
+                await interaction.editReply({
+                    content: 'Could not send the resolution message to the user or disable buttons. They may have DMs disabled or the message was deleted.'
+                });
+            }
+        }
+
+        // Disable the buttons after processing
+        const components = interaction.message.components;
+
+        const updatedComponents = components.map(row => {
+            if (
+                row.components.some(comp =>
+                    comp.customId === 'resolved' ||
+                    comp.customId === 'close_ticket'
+                )
+            ) {
+                const newRow = new ActionRowBuilder();
+
+                row.components.forEach(comp => {
+                    const button = ButtonBuilder.from(comp);
+
+                    if (
+                        button.customId === 'resolved' ||
+                        button.customId === 'close_ticket'
+                    ) {
+                        button.setDisabled(true);
+                    }
+
+                    newRow.addComponents(button);
+                });
+
+                return newRow;
+            }
+
+            return row;
+        });
+
+        await interaction.message.edit({
+            components: updatedComponents
+        });
+
+        return;
+    }
+});
+
+// Message interactions
 client.on('messageCreate', async (message) => {
     await imageSolverHandler(message);
 });
