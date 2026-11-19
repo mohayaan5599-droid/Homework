@@ -1,8 +1,6 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, ThumbnailBuilder, SectionBuilder } = require('discord.js');
 const info = require('../info');
 
-console.log('EMOJI CHECK', JSON.stringify(info.emojis.login), JSON.stringify(info.emojis.queue));
-
 const seperator = new SeparatorBuilder({
     spacing: SeparatorSpacingSize.Small
 });
