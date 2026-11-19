@@ -1,10 +1,23 @@
 require('dotenv').config();
+
 const token = process.env.DISCORD_TOKEN;
 const ADMIN_ROLE = process.env.ADMIN_ROLE;
+
 const fs = require('node:fs');
 const fspromise = require('fs').promises;
 const path = require('node:path');
-const { Client, GatewayIntentBits, EmbedBuilder, Collection, ActionRowBuilder, ButtonBuilder, REST, Routes } = require('discord.js');
+
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    Collection,
+    ActionRowBuilder,
+    ButtonBuilder,
+    REST,
+    Routes
+} = require('discord.js');
+
 const { logError } = require('./utils/errorLogger.js');
 const { executeViewAccounts, saveAccount } = require('./handlers/savedAccountsHandler.js');
 const { educake_collector, educake_model_executor } = require('./educake/main.js');
@@ -12,7 +25,18 @@ const { seneca_collector, seneca_model_executor } = require('./seneca/main.js');
 const { drfrost_collector, drfrost_model_executor } = require('./drfrost/main.js');
 const { createAccount } = require('./handlers/accountHandler.js');
 const { mainAccountLogin } = require('./handlers/mainAccountLogin.js');
-const { viewSavedAccounts, changeMasterPassword, updateAccountInteraction, changeSlots, disableMasterPassword, enableMasterPassword, verifyPasswordForChange, enableMasterPasswordDirect } = require('./handlers/accountManager.js');
+
+const {
+    viewSavedAccounts,
+    changeMasterPassword,
+    updateAccountInteraction,
+    changeSlots,
+    disableMasterPassword,
+    enableMasterPassword,
+    verifyPasswordForChange,
+    enableMasterPasswordDirect
+} = require('./handlers/accountManager.js');
+
 const { updateAnalyticsEmbed } = require('./utils/analytics.js');
 const { handleSettings } = require('./settings/router.js');
 const { handleApiKeyRequest } = require('./handlers/apikeyHandler.js');
@@ -22,24 +46,22 @@ const util = require('util');
 
 // Ensure the file exists
 if (!fs.existsSync('logs.txt')) {
-    fs.writeFileSync('logs.txt', ''); // create an empty file
+    fs.writeFileSync('logs.txt', '');
 }
-// Create a write stream to the file, 'w' = overwrite on startup
+
+// Create a write stream to the file
 const logFile = fs.createWriteStream('logs.txt', { flags: 'w' });
 
 const originalLog = console.log;
 
 console.log = function (...args) {
-    // Write to file
     logFile.write(util.format(...args) + '\n');
-
-    // Also output to the console
     originalLog.apply(console, args);
 };
 
 async function cleanLogs(dir = 'logs') {
-    // Create the folder if it doesn't exist (fixes ENOENT on Railway)
     await fspromise.mkdir(dir, { recursive: true });
+
     const entries = await fspromise.readdir(dir, { withFileTypes: true });
 
     for (const entry of entries) {
@@ -47,7 +69,7 @@ async function cleanLogs(dir = 'logs') {
 
         if (entry.isDirectory()) {
             await cleanLogs(fullPath);
-        } else if (entry.isFile() && entry.name !== ".gitkeep") {
+        } else if (entry.isFile() && entry.name !== '.gitkeep') {
             await fspromise.unlink(fullPath);
         }
     }
@@ -61,6 +83,7 @@ const { cookieUpdate } = require('./cookies_menu.js');
 
 process.on('uncaughtException', async (err) => {
     console.error('Uncaught Exception:', err);
+
     try {
         await logError(err, null, 'Global Uncaught Exception');
     } catch (e) {
@@ -70,6 +93,7 @@ process.on('uncaughtException', async (err) => {
 
 process.on('unhandledRejection', async (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+
     try {
         await logError(reason, null, 'Global Unhandled Rejection');
     } catch (e) {
@@ -84,8 +108,8 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.MessageContent,
-    ],
+        GatewayIntentBits.MessageContent
+    ]
 });
 
 client.on('error', (error) => {
@@ -98,28 +122,34 @@ client.on('warn', (info) => {
 
 client.on('clientReady', () => {
     console.log(`Logged in as ${client.user.tag}!`);
+
     updateAnalyticsEmbed(client);
+
     setInterval(() => {
         updateAnalyticsEmbed(client);
-    }, 300000); // 5 minutes
+    }, 300000);
 });
 
 client.commands = new Collection();
-
 
 const foldersPath = path.join(__dirname, 'commands');
 const commandFolders = fs.readdirSync(foldersPath);
 
 for (const folder of commandFolders) {
     if (folder === '.DS_Store') continue;
+
     const commandsPath = path.join(foldersPath, folder);
     const stats = fs.statSync(commandsPath);
+
     if (!stats.isDirectory()) continue;
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+    const commandFiles = fs.readdirSync(commandsPath)
+        .filter(file => file.endsWith('.js'));
+
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
         const command = require(filePath);
-        // Set a new item in the Collection with the key as the command name and the value as the exported module
+
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
         } else {
@@ -133,7 +163,12 @@ async function registerSlashCommands() {
     try {
         const rest = new REST().setToken(token);
         const commands = client.commands.map(c => c.data.toJSON());
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+
         console.log(`Registered ${commands.length} commands`);
     } catch (err) {
         console.error('Command registration failed:', err);
@@ -143,21 +178,16 @@ async function registerSlashCommands() {
 async function sendPersistentEmbeds(client) {
     await updateAnalyticsEmbed(client);
 
-    // Absolute path to the embeds folder
     const embedsPath = path.join(__dirname, 'startEmbeds', 'embeds');
+    const embedFiles = fs.readdirSync(embedsPath)
+        .filter(file => file.endsWith('.js'));
 
-    // Read all files in the folder
-    const embedFiles = fs.readdirSync(embedsPath).filter(file => file.endsWith('.js'));
-
-    // Collection to store them (optional but recommended)
     const embeds = new Map();
 
-    // Loop through each file
     for (const file of embedFiles) {
         const filePath = path.join(embedsPath, file);
         const embed = require(filePath);
 
-        // Store using filename (without .js) as key
         const name = file.replace('.js', '');
         embeds.set(name, embed);
     }
@@ -165,81 +195,107 @@ async function sendPersistentEmbeds(client) {
     console.log(`Loaded ${embeds.size} embed(s).`);
 
     embeds.forEach(async (container, name) => {
-        const channelID = config.channels[name];
-        if (!channelID) {
-            console.log(`Channel for ${name} is not configured`);
-            return;
+        try {
+            const channelID = config.channels[name];
+
+            if (!channelID) {
+                console.log(`Channel for ${name} is not configured`);
+                return;
+            }
+
+            const channel = await client.channels.fetch(channelID);
+
+            if (!channel) {
+                console.log(`${name} channel not found`);
+                return;
+            }
+
+            const messages = await channel.messages.fetch({ limit: 50 });
+
+            const existingMessage = messages.find(msg =>
+                msg.author.id === client.user.id &&
+                msg.components?.[0]?.components?.[0]?.components?.[0]?.data?.content ===
+                container.components[0].components[0].data.content
+            );
+
+            let embedMessage = existingMessage;
+
+            if (!existingMessage) {
+                console.log(`Sending persistent embed for ${name}`);
+
+                embedMessage = await channel.send({
+                    flags: 32768,
+                    components: [container]
+                });
+            }
+
+            const collectorsMap = new Map([
+                ['languagenut_persistent', languagenut_collector],
+                ['sparx_maths_persistent', sparxReaderCollector],
+                ['sparx_reader_persistent', sparxReaderCollector],
+                ['sparx_science_persistent', sparxReaderCollector],
+                ['educake_persistent', educake_collector],
+                ['seneca_persistent', seneca_collector],
+                ['drfrost_persistent', drfrost_collector]
+            ]);
+
+            const collector = collectorsMap.get(name + '_persistent');
+
+            if (collector) {
+                await collector(embedMessage);
+            }
+        } catch (error) {
+            console.error(`Error loading persistent embed ${name}:`, error);
         }
-
-        const channel = await client.channels.fetch(channelID);
-        if (!channel) {
-            console.log(`${name} channel not found`);
-            return;
-        }
-
-        // Fetch recent messages to check for existing embeds
-        const messages = await channel.messages.fetch({ limit: 50 });
-
-        const existingMessage = messages.find(msg =>
-            msg.author.id === client.user.id &&
-            msg.components?.[0]?.components?.[0]?.components?.[0]?.data?.content === container.components[0].components[0].data.content
-        );
-        let embedMessage = existingMessage;
-
-        if (!existingMessage) {
-            console.log(`Sending persistent embed for ${name}`);
-            embedMessage = await channel.send({
-                flags: 32768,
-                components: [container]
-            });
-        }
-
-        const collectorsMap = new Map([
-            ["languagenut_persistent", languagenut_collector],
-            ["sparx_maths_persistent", sparxReaderCollector],
-            ["sparx_reader_persistent", sparxReaderCollector],
-            ["sparx_science_persistent", sparxReaderCollector],
-            ["educake_persistent", educake_collector],
-            ["seneca_persistent", seneca_collector],
-            ["drfrost_persistent", drfrost_collector]
-        ]);
-
-        await (collectorsMap.get(name + '_persistent'))(embedMessage);
     });
 }
 
 async function DeleteVideos() {
     try {
         const files = await fspromise.readdir('videos');
+
         if (files.length > 1) {
-            console.log("Deleting files...");
+            console.log('Deleting files...');
+
             for (const file of files) {
-                if (file == '.gitkeep') continue;
+                if (file === '.gitkeep') continue;
+
                 const filePath = path.join('videos', file);
+
                 await fspromise.unlink(filePath);
                 console.log(`Deleted ${file}`);
             }
-            console.log("All files deleted.");
+
+            console.log('All files deleted.');
         } else {
-            console.log("No files to delete.");
+            console.log('No files to delete.');
         }
     } catch (err) {
-        console.error("Error deleting files:", err);
+        console.error('Error deleting files:', err);
     }
 }
 
-client.once("clientReady", async () => {
-    console.log("Bot has connected to discord");
+client.once('clientReady', async () => {
+    console.log('Bot has connected to discord');
+
     await registerSlashCommands();
     await sendPersistentEmbeds(client);
     await DeleteVideos();
 });
 
+// Slash command interactions
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
     const command = interaction.client.commands.get(interaction.commandName);
-    // Prevent crash in DMs
+
+    if (!command) {
+        return interaction.reply({
+            content: `No command matching ${interaction.commandName} was found.`,
+            flags: 64
+        });
+    }
+
     if (!interaction.guild) {
         return interaction.reply({
             content: 'This command can only be used in a server.',
@@ -247,36 +303,52 @@ client.on('interactionCreate', async (interaction) => {
         });
     }
 
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-    if (!member.roles.cache.has(ADMIN_ROLE) && !command.public) {
+    // Use the interaction's cached member roles.
+    // Do not fetch the member from Discord before running the command.
+    const memberRoles = interaction.member?.roles;
+
+    const hasAdminRole =
+        memberRoles?.cache?.has(ADMIN_ROLE) ??
+        (Array.isArray(memberRoles) && memberRoles.includes(ADMIN_ROLE));
+
+    if (!hasAdminRole && !command.public) {
         return interaction.reply({
-            content: 'Only admins can run commands',
+            content: 'Only admins can run commands.',
             flags: 64
         });
     }
 
-    if (!command) {
-        await interaction.reply(`No command matching ${interaction.commandName} was found.`);
-        console.error(`No command matching ${interaction.commandName} was found.`);
-        return;
-    }
+    try {
+        await command.execute(interaction, client);
+    } catch (error) {
+        console.error(`Error executing ${interaction.commandName}:`, error);
 
-    await command.execute(interaction, client);
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({
+                content: 'An error occurred while running this command.',
+                flags: 64
+            }).catch(() => {});
+        } else if (interaction.deferred) {
+            await interaction.editReply({
+                content: 'An error occurred while running this command.'
+            }).catch(() => {});
+        }
+    }
 });
 
+// Modal submit interactions
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isModalSubmit()) return;
 
     try {
-
         if (interaction.customId.startsWith('set_slots')) {
-            await interaction.deferUpdate({ flags: 64 });
+            await interaction.deferUpdate();
             await changeSlots(interaction);
             return;
         }
 
         if (interaction.customId === 'change_apikey') {
-            await interaction.deferUpdate({ flags: 64 });
+            await interaction.deferUpdate();
             await handleApiKeyRequest(interaction);
             return;
         }
@@ -288,7 +360,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.customId === 'accountManager_service') {
-            await interaction.deferUpdate({ flags: 64 });
+            await interaction.deferUpdate();
             await updateAccountInteraction(interaction);
             return;
         }
@@ -309,6 +381,7 @@ client.on('interactionCreate', async (interaction) => {
             } else if (interaction.customId.endsWith('remove')) {
                 await mainAccountLogin(interaction, true);
             }
+
             return;
         }
 
@@ -341,8 +414,11 @@ client.on('interactionCreate', async (interaction) => {
             try {
                 await seneca_model_executor(interaction);
             } catch (err) {
-                if (err.code !== 10062) console.error('Error in seneca_model_executor:', err);
+                if (err.code !== 10062) {
+                    console.error('Error in seneca_model_executor:', err);
+                }
             }
+
             return;
         }
 
@@ -350,8 +426,11 @@ client.on('interactionCreate', async (interaction) => {
             try {
                 await drfrost_model_executor(interaction);
             } catch (err) {
-                if (err.code !== 10062) console.error('Error in drfrost_model_executor:', err);
+                if (err.code !== 10062) {
+                    console.error('Error in drfrost_model_executor:', err);
+                }
             }
+
             return;
         }
 
@@ -359,8 +438,11 @@ client.on('interactionCreate', async (interaction) => {
             try {
                 await educake_model_executor(interaction);
             } catch (err) {
-                if (err.code !== 10062) console.error('Error in educake_model_executor:', err);
+                if (err.code !== 10062) {
+                    console.error('Error in educake_model_executor:', err);
+                }
             }
+
             return;
         }
 
@@ -390,7 +472,6 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
-        // Check if user has required roles
         if (!interaction.guild) {
             if (!interaction.replied && !interaction.deferred) {
                 return interaction.reply({
@@ -398,6 +479,7 @@ client.on('interactionCreate', async (interaction) => {
                     flags: 64
                 });
             }
+
             return;
         }
 
@@ -408,16 +490,15 @@ client.on('interactionCreate', async (interaction) => {
                 console.error('Error in languagenut_model_executor:', error);
 
                 if (!interaction.replied && !interaction.deferred) {
-                    try {
-                        await interaction.reply({
-                            content: 'An error occurred while processing your LanguageNut login. Please try again.',
-                            flags: 64
-                        });
-                    } catch (replyError) {
+                    await interaction.reply({
+                        content: 'An error occurred while processing your LanguageNut login. Please try again.',
+                        flags: 64
+                    }).catch(replyError => {
                         console.error('Failed to send error reply for LanguageNut:', replyError);
-                    }
+                    });
                 }
             }
+
             return;
         }
 
@@ -426,25 +507,29 @@ client.on('interactionCreate', async (interaction) => {
                 try {
                     await interaction.deferReply({ flags: 64 });
                 } catch (err) {
-                    if (err.code === 10062) return; // Unknown interaction, ignore
+                    if (err.code === 10062) return;
                     throw err;
                 }
             }
 
             await executeTasks(interaction);
-            // await addPersonToQueue(interaction, 'login');
             return;
         }
 
-        if (interaction.customId.startsWith('sparxreader') || interaction.customId.startsWith('sparxmaths') || interaction.customId.startsWith('sparxscience')) {
+        if (
+            interaction.customId.startsWith('sparxreader') ||
+            interaction.customId.startsWith('sparxmaths') ||
+            interaction.customId.startsWith('sparxscience')
+        ) {
             if (!interaction.replied && !interaction.deferred) {
                 try {
                     await interaction.deferUpdate();
                 } catch (err) {
-                    if (err.code === 10062) return; // Unknown interaction, ignore
+                    if (err.code === 10062) return;
                     throw err;
                 }
             }
+
             await executeTasks(interaction);
             return;
         }
@@ -453,6 +538,7 @@ client.on('interactionCreate', async (interaction) => {
             console.log(`Interaction timeout or already acknowledged, ignoring: ${error.code}`);
             return;
         }
+
         console.error('Error handling modal submit interaction:', error);
         await logError(error, interaction.user, 'Modal Submit Handler');
 
@@ -461,10 +547,11 @@ client.on('interactionCreate', async (interaction) => {
                 content: 'An error occurred while processing your request. Please try again.',
                 flags: 64
             };
+
             if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(errorMessage).catch(() => { });
+                await interaction.followUp(errorMessage).catch(() => {});
             } else {
-                await interaction.reply(errorMessage).catch(() => { });
+                await interaction.reply(errorMessage).catch(() => {});
             }
         } catch (e) {
             // Ignore further errors in the error reporter
@@ -472,17 +559,19 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// Button interactions
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
-    // Handle persistent ticket buttons
     if (['resolved', 'close_ticket'].includes(interaction.customId)) {
         try {
             await interaction.deferReply({ ephemeral: true });
         } catch {
             return;
         }
+
         const embed = interaction.message.embeds[0];
+
         if (!embed || !embed.footer || !embed.footer.text) {
             await interaction.editReply('Could not find ticket information in the embed footer.');
             return;
@@ -497,61 +586,84 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         const userId = userIdMatch[1];
-
         const ticketChannel = interaction.channel;
 
         if (interaction.customId === 'close_ticket') {
             await interaction.editReply('Deleting ticket...');
-            setTimeout(() => ticketChannel.delete().catch(err => console.error('Failed to delete ticket channel:', err)), 1000);
+
+            setTimeout(() => {
+                ticketChannel.delete().catch(err =>
+                    console.error('Failed to delete ticket channel:', err)
+                );
+            }, 1000);
         } else if (interaction.customId === 'resolved') {
             const resolvedEmbed = new EmbedBuilder()
                 .setColor(0x2ECC71)
                 .setTitle('Bug Resolved!')
-                .setDescription("Thank you for your bug report! Our team has investigated and we're happy to let you know that the issue has been fixed.\nYou can now try again. If you run into any other problems, please let us know again.")
-                .setFooter({ text: "Thanks for making SparxNow better!" });
+                .setDescription(
+                    "Thank you for your bug report! Our team has investigated and we're happy to let you know that the issue has been fixed.\nYou can now try again. If you run into any other problems, please let us know again."
+                )
+                .setFooter({
+                    text: 'Thanks for making SparxNow better!'
+                });
 
             try {
                 const user = await client.users.fetch(userId);
-                await user.send({ embeds: [resolvedEmbed] });
-                await interaction.editReply({ content: 'Resolution notice sent to the user.', ephemeral: true });
 
+                await user.send({
+                    embeds: [resolvedEmbed]
+                });
+
+                await interaction.editReply({
+                    content: 'Resolution notice sent to the user.'
+                });
             } catch (e) {
-                console.error("Failed to send resolution message or disable buttons:", e);
-                await interaction.editReply({ content: 'Could not send the resolution message to the user or disable buttons. They may have DMs disabled or the message was deleted.', ephemeral: true });
+                console.error('Failed to send resolution message or disable buttons:', e);
+
+                await interaction.editReply({
+                    content: 'Could not send the resolution message to the user or disable buttons. They may have DMs disabled or the message was deleted.'
+                });
             }
         }
 
         // Disable the buttons after processing
         const components = interaction.message.components;
+
         const updatedComponents = components.map(row => {
-            if (row.components.some(comp => comp.customId === 'resolved' || comp.customId === 'close_ticket')) {
+            if (row.components.some(comp =>
+                comp.customId === 'resolved' ||
+                comp.customId === 'close_ticket'
+            )) {
                 const newRow = new ActionRowBuilder();
+
                 row.components.forEach(comp => {
                     const button = ButtonBuilder.from(comp);
-                    if (button.customId === 'resolved' || button.customId === 'close_ticket') {
+
+                    if (
+                        button.customId === 'resolved' ||
+                        button.customId === 'close_ticket'
+                    ) {
                         button.setDisabled(true);
                     }
+
                     newRow.addComponents(button);
                 });
+
                 return newRow;
             }
+
             return row;
         });
-        await interaction.message.edit({ components: updatedComponents });
+
+        await interaction.message.edit({
+            components: updatedComponents
+        });
 
         return;
     }
-    // Handle other button interactions here if needed
-
 });
-/*
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
 
-    if (handleFAQ(message)) return;
-});
-*/
-
+// Message interactions
 client.on('messageCreate', async (message) => {
     await imageSolverHandler(message);
 });
