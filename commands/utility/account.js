@@ -21,14 +21,12 @@ const config = require('../../config.json');
 
 const queueRanksPositions = config.queue_ranks || {};
 
-// Safe emoji fallback.
 const emojis = new Proxy(config.emojis || {}, {
     get(target, property) {
         return target[property] ?? '🔹';
     }
 });
 
-// Safe colour fallback.
 const colours = config.colours || {};
 
 function getColour(value, fallback) {
@@ -115,31 +113,24 @@ async function getSettingsData() {
     return results;
 }
 
+// Main-account platforms supported by handlers/mainAccountLogin.js.
+// These are project-root folders, not folders inside an "autocompleters" directory.
 async function getPlatformNames() {
-    const baseDir = path.join(process.cwd(), 'autocompleters');
-    const results = [];
+    const platforms = [
+        { label: 'Sparx Maths', value: 'sparx_maths' },
+        { label: 'Sparx Reader', value: 'sparx_reader' },
+        { label: 'Sparx Science', value: 'sparx_science' },
+        { label: 'Sparx Cookies', value: 'sparx' },
+        { label: 'LanguageNut', value: 'languagenut' },
+        { label: 'Educake', value: 'educake' },
+        { label: 'Seneca', value: 'seneca' },
+        { label: 'Dr Frost', value: 'drfrost' }
+    ];
 
-    try {
-        const items = await fs.readdir(baseDir, { withFileTypes: true });
-
-        for (const item of items) {
-            if (item.isDirectory()) {
-                const folderName = item.name;
-                const labelName =
-                    folderName.charAt(0).toUpperCase() + folderName.slice(1);
-
-                results.push({
-                    label: labelName,
-                    value: folderName,
-                    emoji: emojis[folderName]
-                });
-            }
-        }
-    } catch (error) {
-        console.error('Failed to read autocompleters base directory:', error);
-    }
-
-    return results;
+    return platforms.map(platform => ({
+        ...platform,
+        emoji: emojis[platform.value]
+    }));
 }
 
 function createContainer(content, colour = COLOURS.onyx) {
@@ -177,7 +168,6 @@ module.exports = {
     public: true,
 
     async execute(interaction) {
-        // Defer immediately so database requests cannot make the interaction expire.
         await interaction.deferReply({
             flags: MessageFlags.Ephemeral
         });
